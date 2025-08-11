@@ -1,0 +1,13 @@
+@echo off
+echo 啟動DF Boss Reminder Android版本...
+
+echo 檢查Flutter設備...
+flutter devices
+
+echo 獲取依賴...
+flutter pub get
+
+echo 啟動Android模擬器應用...
+flutter run -d emulator-5554
+
+pause

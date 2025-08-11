@@ -1,5 +1,5 @@
 # Slack配置
-SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
+SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
 SLACK_CHANNEL = "#dfbossreminder"
 SLACK_USERNAME = "Bot"
 SLACK_ICON_EMOJI = ":slack:"
