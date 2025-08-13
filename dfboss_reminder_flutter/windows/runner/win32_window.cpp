@@ -140,6 +140,12 @@ bool Win32Window::Create(const std::wstring& title,
       Scale(size.width, scale_factor), Scale(size.height, scale_factor),
       nullptr, nullptr, GetModuleHandle(nullptr), this);
 
+  // Set window to always on top
+  if (window) {
+    SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, 
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  }
+
   if (!window) {
     return false;
   }
@@ -211,6 +217,9 @@ Win32Window::MessageHandler(HWND hwnd,
       if (child_content_ != nullptr) {
         SetFocus(child_content_);
       }
+      // Ensure window stays on top
+      SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
       return 0;
 
     case WM_DWMCOLORIZATIONCOLORCHANGED:
@@ -261,6 +270,14 @@ HWND Win32Window::GetHandle() {
 
 void Win32Window::SetQuitOnClose(bool quit_on_close) {
   quit_on_close_ = quit_on_close;
+}
+
+void Win32Window::SetAlwaysOnTop(bool always_on_top) {
+  if (window_handle_ != nullptr) {
+    HWND insert_after = always_on_top ? HWND_TOPMOST : HWND_NOTOPMOST;
+    SetWindowPos(window_handle_, insert_after, 0, 0, 0, 0, 
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  }
 }
 
 bool Win32Window::OnCreate() {
