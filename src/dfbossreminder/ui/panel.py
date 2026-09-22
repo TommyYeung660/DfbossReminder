@@ -1,0 +1,509 @@
+"""A layered, click-through, always-on-top window that draws the boss readout.
+
+This is the one place the project draws anything, and it is deliberately built so
+that it cannot interfere with play:
+
+* ``WS_EX_TRANSPARENT``   - a click passes straight through to the game;
+* ``WS_EX_NOACTIVATE``    - it never takes focus, so the game keeps its input;
+* ``WS_EX_TOOLWINDOW``    - it stays out of the taskbar and the alt-tab list;
+* ``WS_EX_TOPMOST``       - it stays above the client;
+* per-pixel alpha via ``UpdateLayeredWindow`` - only the text and the backing are
+  visible, not a rectangle of opaque window.
+
+It reads no game state and sends no input; it draws a list of lines it is handed.
+That is what makes the in-game mode (the fourth requirement) the same code as the
+panel mode with a different anchor: the window is placed over the client's
+rectangle either way, and the player sees the readout where the game's own buff
+row is.
+
+Every Windows call is bound inside a function, so this module imports and its
+contract tests run on a machine that has no ``user32`` at all.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import struct
+import sys
+from ctypes import wintypes
+from dataclasses import dataclass
+
+from .layout import place
+
+WS_EX_LAYERED = 0x00080000
+WS_EX_TRANSPARENT = 0x00000020
+WS_EX_TOPMOST = 0x00000008
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_NOACTIVATE = 0x08000000
+WS_POPUP = 0x80000000
+SW_SHOWNOACTIVATE = 4
+HWND_TOPMOST = -1
+SWP_NOSIZE = 0x0001
+SWP_NOACTIVATE = 0x0010
+SWP_SHOWWINDOW = 0x0040
+ULW_ALPHA = 0x00000002
+AC_SRC_OVER = 0x00
+AC_SRC_ALPHA = 0x01
+BI_RGB = 0
+DIB_RGB_COLORS = 0
+TRANSPARENT = 1
+DEFAULT_CHARSET = 1
+
+DT_LEFT = 0x00000000
+DT_RIGHT = 0x00000002
+DT_SINGLELINE = 0x00000020
+DT_NOPREFIX = 0x00000800
+DT_END_ELLIPSIS = 0x00008000
+
+# Global hotkeys. The player presses the key; this process never sends input to the
+# game, and a registered hotkey is the OS delivering a message to our own window.
+WM_HOTKEY = 0x0312
+MOD_NOREPEAT = 0x4000
+PM_REMOVE = 0x0001
+VK = {f"F{n}": 0x6F + n for n in range(1, 13)}
+VK.update({"INSERT": 0x2D, "HOME": 0x24, "END": 0x23})
+
+# The game's HUD is drawn light-on-dark, so the readout keeps the same contrast.
+# The readout mixes ASCII with the zh bearing words, so the font must have both and
+# must be fixed-pitch or the columns drift. Consolas has no CJK glyphs at all: with
+# it the bearing words came out as blank boxes and the double-width characters pushed
+# the minutes past the panel, where the ellipsis ate them. These candidates are all
+# fixed-pitch and CJK-capable, most specific first; the chosen one is verified with
+# GetTextFaceW rather than assumed, because CreateFontW silently substitutes a font
+# it does not have.
+FONT_CANDIDATES = ("MingLiU", "MS Gothic", "SimSun", "Microsoft JhengHei", "Consolas")
+FONT_CANDIDATES_ASCII = ("Consolas", "Courier New")
+
+DEFAULT_BACKGROUND = (14, 13, 11, 214)
+DEFAULT_BORDER = (46, 74, 46)
+DEFAULT_TITLE = (25, 200, 25)
+FONT_FACE = "Consolas"
+
+# Line metrics are derived from the font size rather than pinned, because the size
+# is a user setting: a 12 px readout and an 18 px one cannot share a hard-coded row
+# height without either clipping the tall one or spacing the short one out.
+LINE_GAP = 5
+TITLE_GAP = 8
+
+
+class _BLENDFUNCTION(ctypes.Structure):
+    _fields_ = [("BlendOp", ctypes.c_ubyte), ("BlendFlags", ctypes.c_ubyte),
+                ("SourceConstantAlpha", ctypes.c_ubyte), ("AlphaFormat", ctypes.c_ubyte)]
+
+
+class _BITMAPINFOHEADER(ctypes.Structure):
+    _fields_ = [("biSize", wintypes.DWORD), ("biWidth", ctypes.c_long), ("biHeight", ctypes.c_long),
+                ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD),
+                ("biCompression", wintypes.DWORD), ("biSizeImage", wintypes.DWORD),
+                ("biXPelsPerMeter", ctypes.c_long), ("biYPelsPerMeter", ctypes.c_long),
+                ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
+
+
+class _BITMAPINFO(ctypes.Structure):
+    _fields_ = [("bmiHeader", _BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 3)]
+
+
+@dataclass(frozen=True)
+class Row:
+    """One line of the readout: its text and its colour."""
+
+    text: str
+    colour: tuple[int, int, int] = (235, 235, 235)
+
+
+def _bind():  # noqa: ANN202 - ctypes handles
+    """Declare every prototype that takes a handle.
+
+    Without ``argtypes`` ctypes passes a 64-bit handle as a C int, which dies with
+    "int too long to convert" - every handle here is a pointer.
+    """
+    if sys.platform != "win32":
+        raise RuntimeError("the overlay needs Windows")
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
+
+    user32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR,
+                                       wintypes.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                       ctypes.c_int, wintypes.HWND, wintypes.HMENU,
+                                       wintypes.HINSTANCE, ctypes.c_void_p]
+    user32.CreateWindowExW.restype = wintypes.HWND
+    user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.DefWindowProcW.restype = ctypes.c_long
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.SetWindowPos.restype = wintypes.BOOL
+    user32.DestroyWindow.argtypes = [wintypes.HWND]
+    user32.DestroyWindow.restype = wintypes.BOOL
+    user32.GetDC.argtypes = [wintypes.HWND]
+    user32.GetDC.restype = wintypes.HDC
+    user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+    user32.ReleaseDC.restype = ctypes.c_int
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.GetWindowRect.restype = wintypes.BOOL
+    user32.DrawTextW.argtypes = [wintypes.HDC, wintypes.LPCWSTR, ctypes.c_int, ctypes.c_void_p,
+                                 wintypes.UINT]
+    user32.DrawTextW.restype = ctypes.c_int
+    user32.UpdateLayeredWindow.argtypes = [wintypes.HWND, wintypes.HDC, ctypes.c_void_p,
+                                           ctypes.c_void_p, wintypes.HDC, ctypes.c_void_p,
+                                           wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+    user32.UpdateLayeredWindow.restype = wintypes.BOOL
+
+    gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
+    gdi32.CreateCompatibleDC.restype = wintypes.HDC
+    gdi32.CreateDIBSection.argtypes = [wintypes.HDC, ctypes.c_void_p, wintypes.UINT,
+                                       ctypes.POINTER(ctypes.c_void_p), wintypes.HANDLE, wintypes.DWORD]
+    gdi32.CreateDIBSection.restype = wintypes.HBITMAP
+    gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+    gdi32.SelectObject.restype = wintypes.HGDIOBJ
+    gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
+    gdi32.SetBkMode.restype = ctypes.c_int
+    gdi32.SetTextColor.argtypes = [wintypes.HDC, wintypes.DWORD]
+    gdi32.SetTextColor.restype = wintypes.DWORD
+    gdi32.CreateFontW.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                  ctypes.c_int, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.DWORD, wintypes.LPCWSTR]
+    gdi32.CreateFontW.restype = wintypes.HGDIOBJ
+    gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+    gdi32.DeleteObject.restype = wintypes.BOOL
+    gdi32.DeleteDC.argtypes = [wintypes.HDC]
+    gdi32.DeleteDC.restype = wintypes.BOOL
+    # GetTextFaceW lives in gdi32, not user32 - asking user32 for it fails the whole
+    # overlay with "function not found".
+    gdi32.GetTextFaceW.argtypes = [wintypes.HDC, ctypes.c_int, wintypes.LPWSTR]
+    gdi32.GetTextFaceW.restype = ctypes.c_int
+
+    user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+    user32.RegisterHotKey.restype = wintypes.BOOL
+    user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.UnregisterHotKey.restype = wintypes.BOOL
+    user32.PeekMessageW.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.UINT,
+                                    wintypes.UINT]
+    user32.PeekMessageW.restype = wintypes.BOOL
+    return user32, gdi32
+
+
+def _rgb(colour: tuple[int, int, int]) -> int:
+    """GDI wants ``0x00BBGGRR``, not the ``R, G, B`` this project passes around."""
+    red, green, blue = colour
+    return (red & 0xFF) | ((green & 0xFF) << 8) | ((blue & 0xFF) << 16)
+
+
+class Overlay:
+    """A topmost, click-through layered window that draws rows of text."""
+
+    def __init__(
+        self,
+        left: int,
+        top: int,
+        width: int,
+        height: int,
+        background: tuple[int, int, int, int] = DEFAULT_BACKGROUND,
+        border: tuple[int, int, int] = DEFAULT_BORDER,
+        title_colour: tuple[int, int, int] = DEFAULT_TITLE,
+        font_size: int = 14,
+        font_face: str = "",
+        prefer_ascii: bool = False,
+    ) -> None:
+        self.user32, self.gdi32 = _bind()
+        self.width, self.height = int(width), int(height)
+        self.left, self.top = int(left), int(top)
+        self.background = background
+        self.border = border
+        self.title_colour = title_colour
+        self.line_height = max(10, int(font_size) + LINE_GAP)
+        self.title_height = max(14, int(font_size) + TITLE_GAP)
+        self._rows: tuple[Row, ...] = ()
+        self._title = ""
+        self.face_missing = False
+        self._class_name = f"DFBossReminderOverlay{id(self) & 0xFFFF}"
+
+        self._register_class()
+        self.hwnd = self.user32.CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            self._class_name, "DFBossReminder", WS_POPUP,
+            self.left, self.top, self.width, self.height, None, None, None, None)
+        if not self.hwnd:
+            raise OSError(f"CreateWindowExW failed: {ctypes.get_last_error()}")
+        self._create_buffer(font_size, font_face, prefer_ascii)
+        self.user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
+        self.present()
+
+    # -------------------------------------------------------------------- window
+    def _register_class(self) -> None:
+        WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, wintypes.HWND, wintypes.UINT,
+                                     wintypes.WPARAM, wintypes.LPARAM)
+
+        def _proc(hwnd, message, wparam, lparam):  # noqa: ANN001, ANN202
+            return self.user32.DefWindowProcW(hwnd, message, wparam, lparam)
+
+        self._wndproc = WNDPROC(_proc)
+
+        class _WNDCLASS(ctypes.Structure):
+            _fields_ = [("style", wintypes.UINT), ("lpfnWndProc", WNDPROC),
+                        ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int),
+                        ("hInstance", wintypes.HINSTANCE), ("hIcon", wintypes.HICON),
+                        ("hCursor", wintypes.HANDLE), ("hbrBackground", wintypes.HBRUSH),
+                        ("lpszMenuName", wintypes.LPCWSTR), ("lpszClassName", wintypes.LPCWSTR)]
+
+        window_class = _WNDCLASS()
+        window_class.lpfnWndProc = self._wndproc
+        window_class.lpszClassName = self._class_name
+        if not self.user32.RegisterClassW(ctypes.byref(window_class)):
+            raise OSError(f"RegisterClassW failed: {ctypes.get_last_error()}")
+
+    def _create_buffer(self, font_size: int, font_face: str = "", prefer_ascii: bool = False) -> None:
+        self.screen_dc = self.user32.GetDC(None)
+        self.mem_dc = self.gdi32.CreateCompatibleDC(self.screen_dc)
+        header = _BITMAPINFO()
+        header.bmiHeader.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
+        header.bmiHeader.biWidth = self.width
+        header.bmiHeader.biHeight = -self.height            # top-down
+        header.bmiHeader.biPlanes = 1
+        header.bmiHeader.biBitCount = 32
+        header.bmiHeader.biCompression = BI_RGB
+        bits = ctypes.c_void_p()
+        self.bitmap = self.gdi32.CreateDIBSection(self.mem_dc, ctypes.byref(header),
+                                                  DIB_RGB_COLORS, ctypes.byref(bits), None, 0)
+        self.bits = bits.value
+        if not self.bitmap or not self.bits:
+            raise OSError("could not create the overlay's DIB section")
+        self.gdi32.SelectObject(self.mem_dc, self.bitmap)
+        self.gdi32.SetBkMode(self.mem_dc, TRANSPARENT)
+        self.font_size = font_size
+        candidates = FONT_CANDIDATES_ASCII if prefer_ascii else FONT_CANDIDATES
+        self.font_face = font_face or self._pick_face(font_size, candidates)
+        self.font = self._create_font(font_size, self.font_face)
+        self.blend = _BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
+
+    def _create_font(self, size: int, face: str):  # noqa: ANN202 - HGDIOBJ
+        return self.gdi32.CreateFontW(-size, 0, 0, 0, 600, 0, 0, 0, DEFAULT_CHARSET,
+                                      0, 0, 0, 0, face)
+
+    def _face_exists(self, size: int, face: str) -> bool:
+        """Whether GDI really gives us this face.
+
+        ``CreateFontW`` never fails for an unknown name; it substitutes something and
+        says nothing. Asking the device context which face it ended up with is the
+        only way to tell "MingLiU" from "whatever Arial is here", and that difference
+        is exactly whether the zh bearing words render or come out as blank boxes.
+
+        Any failure here means "cannot tell", which is reported as "this face is not
+        available" rather than raised: a missing glyph is a cosmetic problem and must
+        never stop the readout from appearing.
+        """
+        try:
+            font = self._create_font(size, face)
+            if not font:
+                return False
+            previous = self.gdi32.SelectObject(self.mem_dc, font)
+            buffer = ctypes.create_unicode_buffer(64)
+            written = self.gdi32.GetTextFaceW(self.mem_dc, 64, buffer)
+            self.gdi32.SelectObject(self.mem_dc, previous)
+            self.gdi32.DeleteObject(font)
+        except (AttributeError, OSError):
+            return False
+        return bool(written) and buffer.value.strip().lower() == face.strip().lower()
+
+    def _pick_face(self, size: int, candidates: tuple[str, ...]) -> str:
+        for face in candidates:
+            if self._face_exists(size, face):
+                return face
+        self.face_missing = True
+        return candidates[-1]
+
+    def move_to(self, left: int, top: int) -> None:
+        """Follow the client rectangle without resizing, activating, or stacking."""
+        self.left, self.top = int(left), int(top)
+        self.user32.SetWindowPos(wintypes.HWND(self.hwnd), wintypes.HWND(HWND_TOPMOST),
+                                 self.left, self.top, 0, 0,
+                                 SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW)
+
+    # ------------------------------------------------------------------- drawing
+    @property
+    def rows_fitting(self) -> int:
+        """How many rows the window height can show, so the caller can trim the plan.
+
+        Without this the plan's ``max_rows`` could ask for more rows than fit and the
+        extras would be silently dropped at draw time, which is the kind of quiet
+        truncation this project keeps paying for.
+        """
+        available = self.height - self.title_height - 5
+        return max(1, available // self.line_height)
+
+    def set_content(self, title: str, rows: tuple[Row, ...]) -> None:
+        """Remember what to draw and present it."""
+        self._title = title
+        self._rows = tuple(rows)
+        self.present()
+
+    def present(self) -> None:
+        """Redraw the remembered content into the surface and update the window."""
+        self._fill(self.background)
+        self._outline()
+        self._draw_text()
+        self._update_layered_window()
+
+    def _fill(self, colour: tuple[int, int, int, int]) -> None:
+        red, green, blue, alpha = colour
+        # Premultiplied BGRA, which is what UpdateLayeredWindow with AC_SRC_ALPHA wants.
+        pixel = bytes((blue * alpha // 255, green * alpha // 255, red * alpha // 255, alpha))
+        row = pixel * self.width
+        for y in range(self.height):
+            ctypes.memmove(ctypes.c_void_p(self.bits + y * self.width * 4), row, len(row))
+
+    def _put(self, x: int, y: int, colour: tuple[int, int, int], alpha: int = 255) -> None:
+        if not (0 <= x < self.width and 0 <= y < self.height):
+            return
+        red, green, blue = colour
+        offset = (y * self.width + x) * 4
+        buffer = (ctypes.c_ubyte * 4).from_address(self.bits + offset)
+        buffer[0] = blue * alpha // 255
+        buffer[1] = green * alpha // 255
+        buffer[2] = red * alpha // 255
+        buffer[3] = alpha
+
+    def _outline(self) -> None:
+        """A one-pixel border and a title underline, so the readout reads as a HUD panel."""
+        for x in range(self.width):
+            self._put(x, 0, self.border, 170)
+            self._put(x, self.height - 1, self.border, 170)
+        for y in range(self.height):
+            self._put(0, y, self.border, 170)
+            self._put(self.width - 1, y, self.border, 170)
+        for x in range(3, self.width - 3):
+            self._put(x, self.title_height - 2, self.title_colour, 150)
+
+    def _draw_text(self) -> None:
+        self.gdi32.SelectObject(self.mem_dc, self.font)
+        self.gdi32.SetTextColor(self.mem_dc, _rgb(self.title_colour))
+        self.user32.DrawTextW(self.mem_dc, self._title, -1,
+                             ctypes.byref(wintypes.RECT(8, 2, self.width - 8, self.title_height)),
+                             DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS)
+        y = self.title_height + 3
+        for row in self._rows:
+            if y + self.line_height > self.height - 2:
+                break
+            self.gdi32.SetTextColor(self.mem_dc, _rgb(row.colour))
+            self.user32.DrawTextW(self.mem_dc, row.text, -1,
+                                  ctypes.byref(wintypes.RECT(8, y, self.width - 8, y + self.line_height)),
+                                  DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS)
+            y += self.line_height
+
+    def _update_layered_window(self) -> None:
+        size = wintypes.SIZE(self.width, self.height)
+        source = wintypes.POINT(0, 0)
+        destination = wintypes.POINT(self.left, self.top)
+        ok = self.user32.UpdateLayeredWindow(self.hwnd, self.screen_dc,
+                                             ctypes.byref(destination), ctypes.byref(size),
+                                             self.mem_dc, ctypes.byref(source), 0,
+                                             ctypes.byref(self.blend), ULW_ALPHA)
+        if not ok:
+            raise OSError(f"UpdateLayeredWindow failed: {ctypes.get_last_error()}")
+
+    # ------------------------------------------------------------------ hotkeys
+    def register_hotkey(self, key: str, ident: int = 1) -> bool:
+        """Claim a global key, so the player can toggle something without a console.
+
+        The OS delivers the press as a message to this window; the game never sees
+        it and this process sends nothing. ``MOD_NOREPEAT`` stops a held key from
+        toggling hundreds of times.
+        """
+        name = (key or "").strip().upper()
+        if name not in VK:
+            return False
+        return bool(self.user32.RegisterHotKey(wintypes.HWND(self.hwnd), ident,
+                                               MOD_NOREPEAT, VK[name]))
+
+    def hotkey_pressed(self, ident: int = 1) -> bool:
+        """True once per press. Drains the queue so a double press is seen as one."""
+        message = wintypes.MSG()
+        pressed = False
+        while self.user32.PeekMessageW(ctypes.byref(message), wintypes.HWND(self.hwnd),
+                                       0, 0, PM_REMOVE):
+            if message.message == WM_HOTKEY and message.wParam == ident:
+                pressed = True
+        return pressed
+
+    def unregister_hotkey(self, ident: int = 1) -> None:
+        if self.hwnd:
+            self.user32.UnregisterHotKey(wintypes.HWND(self.hwnd), ident)
+
+    # ------------------------------------------------------------------ teardown
+    def describe(self) -> str:
+        """Whether the window is on screen and where, read back from Windows.
+
+        The position is read back rather than assumed because a scaled display means
+        the coordinates this process placed the window at and the physical pixels
+        are not the same numbers.
+        """
+        rect = wintypes.RECT()
+        visible = bool(self.user32.IsWindowVisible(wintypes.HWND(self.hwnd)))
+        placed = bool(self.user32.GetWindowRect(wintypes.HWND(self.hwnd), ctypes.byref(rect)))
+        where = (f"({rect.left},{rect.top})-({rect.right},{rect.bottom})" if placed else "unreadable")
+        font = f"; font={self.font_face}" + (" (no CJK face found)" if self.face_missing else "")
+        return f"overlay visible={visible} at {where}{font}"
+
+    def dump(self, path: str) -> str:
+        """Write the surface the overlay is presenting, as a 24-bit BMP.
+
+        A layered window is not reproduced by a screen capture on every display
+        configuration, so "what is the overlay drawing" cannot be answered by
+        photographing the desktop. This writes the same pixels the window receives.
+        """
+        raw = ctypes.string_at(self.bits, self.width * self.height * 4)
+        row_size = ((self.width * 3 + 3) // 4) * 4
+        pixels = bytearray()
+        for y in range(self.height - 1, -1, -1):        # BMP rows run bottom-up
+            start = y * self.width * 4
+            row = bytearray()
+            for x in range(self.width):
+                offset = start + x * 4
+                row += bytes((raw[offset + 2], raw[offset + 1], raw[offset]))
+            row += bytes(row_size - len(row))
+            pixels += row
+        header = struct.pack("<2sIHHI", b"BM", 14 + 40 + len(pixels), 0, 0, 14 + 40)
+        info = struct.pack("<IiiHHIIiiII", 40, self.width, self.height, 1, 24, 0,
+                           len(pixels), 2835, 2835, 0, 0)
+        with open(path, "wb") as handle:
+            handle.write(header + info + bytes(pixels))
+        return path
+
+    def close(self) -> None:
+        for handle, delete in ((self.bitmap, self.gdi32.DeleteObject),
+                               (self.font, self.gdi32.DeleteObject)):
+            if handle:
+                delete(handle)
+        self.bitmap = 0
+        self.font = 0
+        if self.mem_dc:
+            self.gdi32.DeleteDC(self.mem_dc)
+            self.mem_dc = 0
+        if getattr(self, "screen_dc", None):
+            self.user32.ReleaseDC(None, self.screen_dc)
+            self.screen_dc = 0
+        if self.hwnd:
+            self.user32.DestroyWindow(wintypes.HWND(self.hwnd))
+            self.hwnd = 0
+
+
+def anchored_overlay(
+    anchor: str,
+    area_left: int,
+    area_top: int,
+    area_width: int,
+    area_height: int,
+    width: int,
+    height: int,
+    offset_x: int = 0,
+    offset_y: int = 0,
+    **kwargs,  # noqa: ANN003 - forwarded to Overlay
+) -> Overlay:
+    """Build an overlay placed by an anchor, so the caller never computes a corner."""
+    left, top = place(anchor, area_left, area_top, area_width, area_height,
+                      width, height, offset_x, offset_y)
+    return Overlay(left, top, width, height, **kwargs)

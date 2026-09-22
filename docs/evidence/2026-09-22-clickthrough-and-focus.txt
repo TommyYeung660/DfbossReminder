@@ -1,0 +1,16 @@
+DFB interactive run 22/09/2026 ¶g¤G 16:16:54.38
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1790065014-43352
+game window: {'left': 242, 'top': 134, 'width': 1280, 'height': 720}
+foreground before: 'ConsoleWindowClass' 'C:\\Windows\\system32\\cmd.EXE'
+starting: C:\Users\tommy.yeung\AppData\Local\Programs\Python\Python313\python.exe C:\DFTools\DfbossReminder\tools\dfboss_main.py --presentation overlay --anchor below-minimap --seconds 18.0
+overlay hwnd=0x1b0b5c visible=True rect=(1177,363)-(1517,603)
+overlay ex-style: WS_EX_TRANSPARENT=True WS_EX_NOACTIVATE=True
+WindowFromPoint at the overlay's centre (1347,483) -> 'UnityWndClass' 'Dead Frontier'
+foreground after: 'ConsoleWindowClass' 'C:\\Windows\\system32\\cmd.EXE'
+
+PASS: clicks pass through to the window underneath, and focus was not taken
+EXITCODE=0
+
+EXITCODE=0

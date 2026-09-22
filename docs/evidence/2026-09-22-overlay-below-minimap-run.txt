@@ -1,0 +1,51 @@
+DFB interactive run 22/09/2026 ¶g¤G 16:14:08.73
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1790064848-38832
+=== case ===
+presentation=overlay anchor=below-minimap duration=24 rect=242 134 1280 720
+cwd=C:\DFTools\DfbossReminder
+
+=== game window ===
+screen: {'left': 0, 'top': 0, 'width': 1920, 'height': 1080}
+
+game window: hwnd=0x7a02c2 pid=17524 title='Dead Frontier'
+  client in screen coordinates: {'left': 242, 'top': 134, 'width': 1280, 'height': 720}
+  exclusive_fullscreen (heuristic): False
+  client 1280x720 at (242, 134)
+
+visible windows: 13 (9 decorated)
+class                   client (screen)                   title
+ConsoleWindowClass      (112,135) 960x480                 C:\Windows\system32\cmd.EXE
+UnityWndClass           (242,134) 1280x720                Dead Frontier
+SDL_app                 (-32000,-32000) 160x28            Steam
+
+client rectangles are on-screen and plausible: the measurement works here
+
+=== starting the overlay ===
+=== screen capture (from the desktop) ===
+wrote tools\pc\evidence\20260922T161417Z-dfboss-overlay.png (1920 x 1080 at 0,0)
+wrote tools\pc\evidence\20260922T161417Z-dfboss-overlay-client.png (1280 x 720 at 242,134)
+
+Now send the images back, or read them where they are.
+On the images check: the readout is above the game, only the readout and its
+backing are visible (no opaque rectangle), and the text is legible.
+capture exit=0
+
+=== artifacts ===
+overlay.bmp 244854 bytes
+20260922T150406Z-dfboss-panel.png
+20260922T150908Z-dfboss-panel.png
+20260922T150955Z-dfboss-panel.png
+20260922T151154Z-dfboss-overlay-client.png
+20260922T151154Z-dfboss-overlay.png
+20260922T152059Z-dfboss-overlay-client.png
+20260922T152059Z-dfboss-overlay.png
+20260922T160104Z-dfboss-overlay.png
+20260922T160201Z-dfboss-overlay.png
+20260922T160805Z-dfboss-overlay.png
+20260922T161417Z-dfboss-overlay-client.png
+20260922T161417Z-dfboss-overlay.png
+
+=== done ===
+EXITCODE=0

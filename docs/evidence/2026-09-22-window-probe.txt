@@ -1,0 +1,25 @@
+DFB interactive run 22/09/2026 ¶g¤G 15:17:57.28
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1790061477-49574
+screen: {'left': 0, 'top': 0, 'width': 1920, 'height': 1080}
+
+game window: hwnd=0x7a02c2 pid=17524 title='Dead Frontier'
+  client in screen coordinates: {'left': 242, 'top': 134, 'width': 1280, 'height': 720}
+  exclusive_fullscreen (heuristic): False
+  client 1280x720 at (242, 134)
+
+visible windows: 13 (9 decorated)
+class                   client (screen)                   title
+ConsoleWindowClass      (164,187) 960x480                 C:\Windows\system32\cmd.EXE
+UnityWndClass           (242,134) 1280x720                Dead Frontier
+SDL_app                 (-32000,-32000) 160x28            Steam
+ApplicationFrameWindow  (0,-8) 1920x1048                  è¨­å®š
+WinUIDesktopWin32Window (164,156) 384x508                 PowerToys Quick Access (Preview)
+Chrome_WidgetWin_1      (-32000,-32000) 160x28            Tasks - my_vault - Obsidian 1.13.7
+Chrome_WidgetWin_1      (-31992,-32000) 144x20            #rules-and-important-info | DFProfil
+Chrome_WidgetWin_1      (-31992,-32000) 144x20            Dead Frontier Online Zombie MMO - In
+
+client rectangles are on-screen and plausible: the measurement works here
+
+EXITCODE=0

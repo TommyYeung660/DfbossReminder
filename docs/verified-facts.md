@@ -1,0 +1,128 @@
+# DFBossReminder Verified Facts
+
+Working fact ledger. Evidence levels:
+
+* **Recorded live** — observed against the real service or the real client, with the
+  raw values kept here or in `docs/evidence/`.
+* **Measured upstream** — measured by the sibling project `DFLooterHelper` against
+  the running client; a lead, re-usable here because it is about the same client.
+* **Implementation fact** — this source does it and its tests pass.
+* **Not live verified** — no run has established it yet.
+* **Open question** — explicitly unknown; the first game-PC session answers it.
+
+## The two data sources
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| `https://www.dfprofiler.com/bossmap/json/?_=<ms>` returns a JSON object keyed by event index; each value is one event | Recorded live | fetch 2026-09-22, 25 entries, 14,257 bytes |
+| An event's `locations` is a list of two-element **string** pairs, e.g. `[["1000","1004"]]`; a 60-minute city boss cycle listed 29 of them | Recorded live | same fetch, `game_id` 13 = `1 x Flaming Mother`, 29 locations |
+| An event's boss name is `special_enemy_type` (e.g. `4 x Bandits`), the count is `special_enemy_amount`, and `boss_num` is non-zero for a cycle entry and `0` for a mission | Recorded live | same fetch |
+| Mission events carry `event_type: "mission"` and a `title`; cycle events have `event_type: ""` | Recorded live | `game_id` 0/2 (mission, `The Flames`/`Flamin' Stenches`) vs `game_id` 5–19 (cycle, no title) |
+| `start_time` and `end_time` are unix seconds, published as strings; a city cycle is 60 minutes, a mission window was 695 | Recorded live | 14:00→15:00 for the cycle entries, 04:20→15:55 for the missions |
+| The endpoint needs the page's headers (`Referer`, `X-Requested-With: XMLHttpRequest`); without them it answers with HTML, not JSON | Implementation fact | `services/profiler.py`, and the previous tool's code carries the same headers |
+| `https://www.dfprofiler.com/profile/json/<user_id>?_=<ms>` returns one account; `gpscoords` is `["1057","1017"]` and `override.account_name` is the display name | Recorded live | `user_id` 14008279 → `gpscoords` `["1057","1017"]`, `account_name` `tommy660`, 2026-09-22 |
+| `gpscoords` is the account's **last known** map block; it is unchanged between sessions when the account has not moved in-game | Recorded live | the same value on 2026-09-22 as the sibling project recorded live on 2026-09-18 |
+
+## The coordinate spaces — the fact the design turns on
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| The boss map's `locations` and a profile's `gpscoords` are the **same** grid, and it is the game's map coordinate: both read around `1000–1060 x 981–1020` for the same district | Recorded live | boss fetch and profile fetch, 2026-09-22 |
+| The client's in-memory player position is **block-local**, not a map coordinate: world `(48.2728, -0.0002, 38.8946)` while the map read `1057 x 1017` | Measured upstream | `DFLooterHelper/docs/evidence/builds/client-layout-2026-09-18.json`, `player_position` |
+| A 3D district is roughly the size of nine 2D cells, so one district spans a few map blocks | Wiki-sourced | `DFLooterHelper` wiki note (*Inner City*, *Points of Interest*) |
+| Therefore an in-memory position cannot be compared with a boss's map block, and this tool does not try | Implementation fact | `docs/system-design.md` §2.1 |
+
+## What this implementation does, and its tests
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| `--once` prints a real plan for account 14008279 at block `1057,1017`: 5 bosses within 6 blocks, leader `3 x Irradiated Titan` at `1058,1016`, distance 1, bearing `1右1上` | Recorded live | 2026-09-22, `--radius 6` |
+| Whitelist mode suppresses by coordinate, not by radius: one entry `1054,987:3` suppressed 159 of 162 sightings and showed 3 bosses at 28–32 blocks | Recorded live | 2026-09-22, `--whitelist "1054,987:3" --whitelist-mode on` |
+| The count of sightings and of those beyond the radius are exported, so a filter can be audited after the fact | Recorded live | the `--json` export carries `counts.total_sightings` 162, `beyond_radius` 157 |
+| The radius test is the block count (`chebyshev`), so a diagonal neighbour is one block | Implementation fact | `domain/geometry.py`, `tests/test_geometry.py` |
+| A mission is excluded unless `include_missions` is set | Implementation fact | `domain/bosses.py`, `tests/test_bosses.py` |
+| The whitelist overrides the radius; whitelist mode with an empty list shows nothing | Implementation fact | `domain/plan.py`, `tests/test_plan.py` |
+| 144 tests pass on macOS | Recorded live | `python3 -m pytest`, 2026-09-22 |
+| Neither Windows module calls `WriteProcessMemory`, `CreateRemoteThread`, `SendInput`, `keybd_event`, `mouse_event`, `PostMessage` or `SetForegroundWindow` | Implementation fact | `tests/test_panel_contract.py` asserts the source |
+
+## The overlay window
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| The overlay is created with `WS_EX_LAYERED \| WS_EX_TRANSPARENT \| WS_EX_TOPMOST \| WS_EX_TOOLWINDOW \| WS_EX_NOACTIVATE` and shown with `SW_SHOWNOACTIVATE` | Implementation fact | `ui/panel.py`, pinned by `tests/test_panel_contract.py` |
+| The same window serves the in-game mode and the side-panel mode; only the anchoring rectangle differs | Implementation fact | `ui/layout.py` `place()`, `app.OverlayPresenter` |
+| A client rectangle covering the whole monitor is reported as a fullscreen risk rather than classified, because a borderless window at monitor size is indistinguishable from a fullscreen swap chain by that measurement alone | Implementation fact | `services/window.py` `measure_window` |
+
+### Verified on the game PC, 2026-09-22
+
+The client was running **windowed at `1280x720`, at `(242,134)`**, class `UnityWndClass`,
+title `Dead Frontier`, on a `1920x1080` primary screen.
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| The overlay appears over the game's own client area: it reports `visible=True at (256,148)-(686,388)`, which is the client origin `(242,134)` inset by the configured 14 px | Recorded live | `--presentation overlay --anchor top-left` job output; equals client + (14,14) |
+| The readout is visible in a capture of the game's client area, above the game's rendering | Recorded live | `docs/evidence/2026-09-22-overlay-over-game-client.png` |
+| The game's **own minimap read `1057 X 1017`** while the readout's header read `1057,1017` — the profiler's `gpscoords` and the client's displayed coordinate are the same number, which is the cross-check the whole coordinate decision rests on | Recorded live | the same capture, top-right of the client area |
+| Clicks pass through: `WindowFromPoint` at the overlay's centre resolved to the window **underneath**, not to the overlay — and at the below-minimap placement it resolved to `UnityWndClass 'Dead Frontier'` itself, so a click in the readout reaches the game | Recorded live | `docs/evidence/2026-09-22-clickthrough-and-focus.txt` |
+| The overlay does not take focus: the foreground window was the same `cmd.exe` before and after it appeared | Recorded live | same file |
+| The created window really has `WS_EX_TRANSPARENT` and `WS_EX_NOACTIVATE` set, read back from Windows rather than assumed | Recorded live | same file |
+| `GetClientRect` + `ClientToScreen` produce correct screen-space client rectangles on this machine: 9 decorated windows measured, every rectangle intersecting the screen plausibly, and the game's own `1280x720` at `(242,134)` | Recorded live | `docs/evidence/2026-09-22-window-probe.txt` |
+| The font auto-pick resolved to **MS Gothic** there (MingLiU and SimSun are not installed on that machine) | Recorded live | the overlay's own `describe()` line |
+| **F8 really registers as a global hotkey**: the overlay reports `F8 toggles whitelist mode` rather than the failure note, so the in-game whitelist toggle is live and not merely compiled in | Recorded live | `docs/evidence/2026-09-22-overlay-over-client-run.txt` |
+
+### Verified on the game PC, 2026-09-22 (second session: the readout format)
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| The region minimap occupies client `(1060, 10)` size `215` at 1280x720 — measured, not assumed: the minimap's own `BUNKER` header sits at its top and its `1057 X 1017` readout at its bottom, bracketing the rectangle from both sides | Recorded live | client-area capture, cropped at that rectangle |
+| The readout is placed **below the minimap, right-aligned to its right edge**: for a client at `(242,134)` it reports `(1177,363)-(1517,583)`, and `1517 = 242 + 1060 + 215` is the minimap's right edge while `363 = 134 + 10 + 215 + 4` is its bottom plus the gap | Recorded live | `docs/evidence/2026-09-22-overlay-below-minimap-run.txt` |
+| The readout is visible under the minimap in a capture of the game's client area, bright green on the dark backing, with the game's own `1057 X 1017` just above it | Recorded live | `docs/evidence/2026-09-22-overlay-below-minimap-on-client.png` |
+| The normal format renders exactly as asked: `6 x Bandits | 1054 x 1018 | 3LD1`, bright green, at the configured 12 px | Recorded live | same capture, and `…-formats.png` |
+| The big/ultra format renders with the **end time**: `Charred Titan | 1046 x 1017 | 17:00` for a cycle that started at 16:00 and ends at 17:00 | Recorded live | `--big-boss "Charred Titan"` against the live 16:00 cycle |
+| `5LD1` is the right encoding: the player at `1057,1017` and a boss at `1052,1018` is five blocks left and one down | Recorded live | the hand-written example, reproduced by the code and pinned by a test |
+| Big/ultra bosses lead the list, so a special spawn is not buried under nearer ordinary ones | Implementation fact | `domain/plan.py`, `tests/test_view.py` |
+| The settings window opens on the game PC: a visible `736x799` window titled `DFBossReminder settings` | Recorded live | `tools/pc/probe-config-gui.py` |
+| The settings window needs no game: it was opened while the client was running, and the probe reports the client's state rather than requiring either answer | Recorded live | same probe |
+| The overlay is refused when the game is not running, and the refusal is not swallowed by the console fallback | Implementation fact | `tests/test_app.py`, `app.GameNotRunning` |
+| The tier is a **name list**, because the boss map carries no tier; the default is the wiki's Special Daily Bosses | Wiki-sourced | *Bosses*, threat levels 1–8 plus "Special Daily Bosses … extra tough … once per day … stay for 3 hours instead of the normal bosses' 1 hour" |
+
+### Defects the live run found, and the fixes
+
+Running it on Windows was worth it for these alone: none was visible from the
+development machine or from any test.
+
+| Defect | Cause | Fix |
+| --- | --- | --- |
+| The zh bearing words rendered as **blank boxes** | The font was `Consolas`, which has no CJK glyphs; GDI substitutes silently rather than failing | A candidate list of fixed-pitch CJK faces, each verified through `GetTextFaceW` before use |
+| The **minutes column was cut off** (`0…`) | Columns were padded by `len()`, so a double-width `左` pushed the line past the panel and the ellipsis ate the last field | Padding by **display width** (`east_asian_width`), pinned by a test that every row is exactly 47 columns in both styles |
+| The overlay died with `AttributeError: function 'GetTextFaceW' not found` | It was bound on `user32`; it lives in `gdi32` | Bound on `gdi32`, and any probe failure now means "face unavailable" so a missing glyph can never stop the readout appearing |
+| A long joined name (`1 x Evolved Longarms + 1 x Irradiated …`) **elbowed the coordinate and the bearing off the line**, leaving `… \| …` | A fixed name budget, so the line overflowed the panel and the window's ellipsis ate the last fields | The budget is computed from the configured width and font size minus everything that follows the name; a test asserts every row fits the shipped width |
+| The title was cut mid-word (`… 1057,1017  …`) | The title was one fixed string, wider than the narrow strip | The longest form that fits is used, dropping the account name first; a test checks the budget at every shipped width |
+
+## Open questions
+
+1. ~~Does the overlay appear over the client in windowed mode, above the game while
+   the game is focused?~~ **Answered: yes** (table above). Borderless-windowed is
+   still untested.
+2. ~~Does the client rectangle place the overlay correctly under display DPI
+   scaling?~~ **Answered: yes** on this machine at its current scaling (1920x1080,
+   no scaling); a scaled display is still untested.
+3. ~~Does a click over the overlay reach the game, and does the game keep focus?~~
+   **Answered: yes for the click and for focus**, programmatically. Whether the game
+   keeps *keyboard* focus while the user types is a human check.
+4. **How often does the game report `gpscoords`?** Still unmeasured; the panel shows
+   the age rather than assuming a cadence.
+5. Does the boss map change shape between client updates in a way the parser has not
+   seen? The parser skips what it cannot read and the fixtures use a real payload, so
+   a change should appear as fewer bosses, not as a wrong block.
+6. Does the overlay follow the client when the window is **moved**? The re-anchor runs
+   every `watch_pid_seconds`, and the below-minimap corner is recomputed from the
+   client each time, but no run has recorded a move.
+7. **The refusal has never been seen live.** The client was running in every session
+   and closing it would have cost the player their game, so "no game, no overlay" is
+   unit-tested and pinned, not observed.
+8. Does the settings window's **Save** round-trip through the real file on Windows?
+   Its data half is tested and the window opens; no run has clicked Save.
+9. Is `U`/`D` on the boss map the same way up as the client's own minimap? The
+   encoding matches the player's example and the boss map's own orientation, but
+   nobody has walked north and watched the field change.

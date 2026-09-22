@@ -1,0 +1,52 @@
+DFB interactive run 22/09/2026 ¶g¤G 15:20:50.17
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1790061649-53926
+=== case ===
+presentation=overlay anchor=top-left duration=22 rect=242 134 1280 720
+cwd=C:\DFTools\DfbossReminder
+
+=== game window ===
+screen: {'left': 0, 'top': 0, 'width': 1920, 'height': 1080}
+
+game window: hwnd=0x7a02c2 pid=17524 title='Dead Frontier'
+  client in screen coordinates: {'left': 242, 'top': 134, 'width': 1280, 'height': 720}
+  exclusive_fullscreen (heuristic): False
+  client 1280x720 at (242, 134)
+
+visible windows: 13 (9 decorated)
+class                   client (screen)                   title
+ConsoleWindowClass      (216,239) 960x480                 C:\Windows\system32\cmd.EXE
+UnityWndClass           (242,134) 1280x720                Dead Frontier
+SDL_app                 (-32000,-32000) 160x28            Steam
+
+client rectangles are on-screen and plausible: the measurement works here
+
+=== starting the overlay ===
+settings saved to C:\Users\tommy.yeung\.dfbossreminder\settings.json
+DFBossReminder 0.1.0 - overlay visible=True at (256,148)-(686,388); font=MS Gothic; anchored to the game client; F8 toggles whitelist mode
+fetched 14 boss events; player 1057,1017
+overlay surface written to C:\DFTools\DfbossReminder\tools\pc\..\..\tools\pc\evidence\overlay.bmp; overlay visible=True at (256,148)-(686,388); font=MS Gothic; anchored to the game client; F8 toggles whitelist mode
+=== screen capture (from the desktop) ===
+wrote tools\pc\evidence\20260922T152059Z-dfboss-overlay.png (1920 x 1080 at 0,0)
+wrote tools\pc\evidence\20260922T152059Z-dfboss-overlay-client.png (1280 x 720 at 242,134)
+
+Now send the images back, or read them where they are.
+On the images check: the readout is above the game, only the readout and its
+backing are visible (no opaque rectangle), and the text is legible.
+capture exit=0
+fetched 14 boss events; player 1057,1017
+
+=== artifacts ===
+overlay.bmp 310134 bytes
+20260922T150406Z-dfboss-panel.png
+20260922T150908Z-dfboss-panel.png
+20260922T150955Z-dfboss-panel.png
+20260922T151154Z-dfboss-overlay-client.png
+20260922T151154Z-dfboss-overlay.png
+20260922T152059Z-dfboss-overlay-client.png
+20260922T152059Z-dfboss-overlay.png
+
+=== done ===
+
+EXITCODE=0

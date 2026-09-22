@@ -1,11 +1,27 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
 [project]
 name = "dfbossreminder"
 version = "0.1.0"
-description = "Add your description here"
+description = "Dead Frontier overlay that shows the bosses within a configurable radius of the player"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "beautifulsoup4>=4.13.4",
-    "requests>=2.32.4",
-    "schedule>=1.2.2",
-]
+dependencies = []
+
+[project.optional-dependencies]
+windows = ["pyinstaller>=6.6"]
+
+[project.scripts]
+dfboss = "dfbossreminder.app:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dfbossreminder"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

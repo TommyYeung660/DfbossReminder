@@ -1,0 +1,90 @@
+{
+  "version": "0.1.0",
+  "settings": {
+    "user_id": "14008279",
+    "base_url": "https://www.dfprofiler.com",
+    "radius_blocks": 6,
+    "whitelist_mode": true,
+    "whitelist": [
+      {
+        "x": 1054,
+        "y": 987,
+        "radius": 3,
+        "label": "Bunker"
+      }
+    ],
+    "include_missions": false,
+    "show_all_without_player": true,
+    "poll_seconds": 6.0,
+    "stale_seconds": 120.0,
+    "presentation": "console",
+    "anchor": "top-left",
+    "offset_x": 14,
+    "offset_y": 14,
+    "width": 430,
+    "height": 240,
+    "max_rows": 10,
+    "emphasis_blocks": 1,
+    "direction_style": "zh",
+    "waypoints": [
+      {
+        "label": "Secronom Bunker",
+        "x": 1054,
+        "y": 987
+      }
+    ],
+    "watch_pid_seconds": 5.0
+  },
+  "account": "tommy660",
+  "player": {
+    "x": 1057,
+    "y": 1017
+  },
+  "fetched_at": "2026-09-22T06:50:58Z",
+  "fetched": {
+    "boss_events": 14,
+    "player_known": true
+  },
+  "counts": {
+    "total_sightings": 162,
+    "nearby_sightings": 3,
+    "shown": 3,
+    "suppressed_by_whitelist": 159,
+    "beyond_radius": 0
+  },
+  "notes": [
+    "whitelist on (1 entries, 159 suppressed)"
+  ],
+  "rows": [
+    {
+      "name": "4 x Bandits",
+      "amount": 4,
+      "x": 1057,
+      "y": 989,
+      "distance": 28,
+      "bearing": "28上",
+      "minutes_left": 9.04,
+      "mission": false
+    },
+    {
+      "name": "4 x Bandits",
+      "amount": 4,
+      "x": 1055,
+      "y": 987,
+      "distance": 30,
+      "bearing": "2左30上",
+      "minutes_left": 9.04,
+      "mission": false
+    },
+    {
+      "name": "2 x Flaming Giant Spider",
+      "amount": 2,
+      "x": 1052,
+      "y": 985,
+      "distance": 32,
+      "bearing": "5左32上",
+      "minutes_left": 9.04,
+      "mission": false
+    }
+  ]
+}
