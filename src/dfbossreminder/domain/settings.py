@@ -115,6 +115,12 @@ class Settings:
     minimap_gap: int = 4
 
     font_size: int = 10
+    # 300 = light. The client's HUD font ships exactly one face (its OS/2 table says 400,
+    # its subfamily name says "Regular"), and weights 100 through 500 were measured to
+    # draw byte-identical pixels on the game PC - so 300 is at the floor rather than
+    # lighter than 400, and 700 and up make GDI synthesise a heavier face. There is no
+    # lighter cut to reach for; the overlay reports what it asked for beside what it got.
+    font_weight: int = 300
     colours: tuple[tuple[str, str], ...] = tuple(DEFAULT_COLOURS.items())
     # Zero means a fully transparent backing: only the glyphs are drawn, so the game
     # underneath is untouched. A text shadow keeps them readable over bright ground.
@@ -335,6 +341,7 @@ def parse_settings(payload: object) -> Settings:
         direction_style=_one_of(payload.get("direction_style"), DIRECTION_STYLES, defaults.direction_style),
         font_face=_text_field(payload.get("font_face"), defaults.font_face),
         font_size=_clamp_int(payload.get("font_size"), defaults.font_size, 8, 32),
+        font_weight=_clamp_int(payload.get("font_weight"), defaults.font_weight, 100, 900),
         colours=_colours(payload.get("colours"), defaults.colours),
         opacity=_clamp_float(payload.get("opacity"), defaults.opacity, 0.0, 1.0),
         text_shadow=_as_bool(payload.get("text_shadow"), defaults.text_shadow),
@@ -375,6 +382,7 @@ def to_dict(settings: Settings) -> dict:
         "direction_style": settings.direction_style,
         "font_face": settings.font_face,
         "font_size": settings.font_size,
+        "font_weight": settings.font_weight,
         "colours": settings.colour_map,
         "opacity": settings.opacity,
         "text_shadow": settings.text_shadow,

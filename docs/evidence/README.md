@@ -26,6 +26,10 @@ here is an implementation fact at best.
 | `2026-09-22-overlay-below-minimap-run.txt` | The whole run as the game PC printed it: the game window's rectangle, the readout's own `(1177,363)-(1517,583)`, the font, the hotkey, and both captures written |
 | `2026-09-22-overlay-over-client-run.txt` | The whole in-game run as the game PC printed it: the client rectangle, `overlay visible=True at (256,148)-(686,388)`, `font=MS Gothic`, `F8 toggles whitelist mode`, and both captures written |
 | `2026-09-22-clickthrough-and-focus.txt` | `tools/pc/probe-clickthrough.py` output: `WS_EX_TRANSPARENT` and `WS_EX_NOACTIVATE` are really set, `WindowFromPoint` at the overlay's centre resolves to the window underneath, and the foreground window is unchanged |
+| `2026-09-22-font-weight-probe.txt` | `tools/pc/probe-font-weight.py` output: 21 surfaces for seven weights × three shadow styles. Weights 100–500 share one MD5 and one ink count, so a 300 request renders exactly the 400 raster; 700 and up make GDI synthesise a heavier face; the four-offset shadow adds 141 pixels of fringe over the single one |
+| `2026-09-22-overlay-weight-shadow-comparison.png` | The same line in the same font twice, at 3x: `weight 300 asked, single drop shadow` above `weight 400 asked, four-offset shadow`. The shadow is the only difference between the rows, which is where the visible lightening comes from |
+| `2026-09-22-overlay-weight300-on-client.png` | The readout over the game client at the shipped settings — `weight=300`, single drop shadow, right-aligned, transparent backing |
+| `2026-09-22-overlay-weight300-run.txt` | The run that produced it: `font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on` |
 
 The JSON plans were produced by the tool itself (`--once --json`); the probes wrote
 their own output; the images came from the machine. None was written by hand.

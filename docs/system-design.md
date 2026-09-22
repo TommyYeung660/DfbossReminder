@@ -224,6 +224,31 @@ boss lines (ASCII) in the client's font, rows containing Chinese in a CJK face.
 Without this the readout would be perfect boss lines sitting above four lines of
 boxes.
 
+### D16 — The weight is reported, the shadow is what lightens the text
+
+The readout was asked for `font-weight: 300`. Reading the font's metadata answers a
+different question than the one being asked: it declares a single face
+(`OS/2 usWeightClass` 400, subfamily "Regular"), so *"is there a lighter outline to
+select?"* is **no** — but that says nothing about whether GDI honours the number
+anyway. It does: `GetObjectW` echoes 300 straight back, so the read-back cannot be
+used as evidence of the drawn strokes either.
+
+The probe therefore measures pixels instead of trusting either signal, and found a
+three-band reality: **100 through 500 render byte-identically** (one MD5, one ink
+count), and **700 and up make GDI synthesise a heavier face** even though the family
+has no bold. Two consequences the code follows:
+
+* the readout reports what it asked for *next to* what GDI returned, and never claims
+  the strokes weigh that number — the honest reading is "300 is at the floor";
+* the visible lightening came from the **shadow**, not the weight. Four one-pixel
+  offsets put dark fringe on all four sides of every glyph, which at 10 px presses
+  against every stem and reads as emboldening; one offset keeps the fringe on a single
+  side. That is why the weight change alone would have been imperceptible.
+
+This is the general shape of a Windows-only cosmetic setting: the request, the
+recorded value and the drawn pixels are three different things, and only the third is
+what the player sees.
+
 ### D12 — The window follows its content
 
 The height was a fixed setting, and the live run showed it clipping the *notes* at the

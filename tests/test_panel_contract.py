@@ -118,6 +118,56 @@ def test_the_game_font_is_loaded_privately_and_never_installed() -> None:
         assert forbidden not in PANEL_SOURCE
 
 
+def test_the_window_class_name_cannot_collide_between_overlays() -> None:
+    # A window class name is unique per process, and RegisterClassW refuses a repeat with
+    # 1410. Naming the class after the object's address only looked unique: the address
+    # is reused once the first overlay is freed, and the 16-bit slice collided often
+    # enough that the probe's second overlay failed to open. A counter cannot repeat.
+    assert "itertools.count" in PANEL_SOURCE
+    assert "_CLASS_SEQ" in PANEL_SOURCE
+    assert re.search(r"_class_name = f\"[^\"]*\{os\.getpid\(\)\}_\{next\(_CLASS_SEQ\)\}\"",
+                     PANEL_SOURCE), "the class name must be unique per instance"
+    assert "id(self)" not in PANEL_SOURCE, "an address is not an identity"
+
+
+def test_the_window_class_is_released_with_the_window() -> None:
+    # The class outlives DestroyWindow, so a process that opens and closes overlays leaks
+    # class names until one collides. Unregistering it in close() is the other half of
+    # the fix above.
+    assert "UnregisterClassW" in PANEL_SOURCE
+    body = PANEL_SOURCE[PANEL_SOURCE.index("    def close("):]
+    body = body[:body.index("\ndef ")]
+    assert "DestroyWindow" in body and "UnregisterClassW" in body
+    assert body.index("DestroyWindow") < body.index("UnregisterClassW")
+
+
+def test_the_weight_is_reported_because_it_is_only_a_request() -> None:
+    # The client's HUD font ships one face (OS/2 usWeightClass 400, subfamily
+    # "Regular"), so there is no lighter outline for 300 to select. GDI nonetheless
+    # echoes the requested 300 back through GetObjectW on the game PC, which is why the
+    # readout says what was asked for next to what came back instead of claiming the
+    # drawn strokes are that weight - the probe measures the pixels for that question.
+    assert "GetObjectW" in PANEL_SOURCE
+    assert "resolved_weight" in PANEL_SOURCE
+    assert "lfWeight" in PANEL_SOURCE
+    assert "asked" in PANEL_SOURCE
+    # 600 was the old hard-coded weight, which this font can never provide.
+    assert "0, 0, 0, 600, 0, 0, 0" not in PANEL_SOURCE
+
+
+def test_the_shadow_is_a_single_offset_not_four() -> None:
+    # Four offsets put shadow on every side of every glyph. That fills the gaps between
+    # stems and reads as emboldening, which is what made a weight-300 request look heavy.
+    # The probe (tools/pc/probe-font-weight.py) counts the pixels; this pins the shape.
+    body = PANEL_SOURCE[PANEL_SOURCE.index("def _text("):]
+    body = body[:body.index("def _update_layered_window")]
+    offsets = [line.strip() for line in body.splitlines()
+               if "left +" in line or "left -" in line or "top -" in line]
+    assert offsets == ["ctypes.byref(wintypes.RECT(left + 1, top + 1,"], offsets
+    # One rectangle, one offset: a second RECT would be another shadow pass.
+    assert body.count("wintypes.RECT") == 2, "one rect for the shadow, one for the glyphs"
+
+
 def test_the_alignment_is_a_gdi_flag() -> None:
     assert panel_module.ALIGN_FLAGS["right"] == panel_module.DT_RIGHT == 0x00000002
     assert panel_module.ALIGN_FLAGS["left"] == panel_module.DT_LEFT == 0
@@ -202,10 +252,10 @@ def test_a_transparent_backing_draws_no_frame() -> None:
 
 
 def test_a_transparent_backing_shadows_the_text_instead() -> None:
-    # GDI cannot outline a glyph, so the shadow is the text drawn in near-black at four
-    # one-pixel offsets first. Without it, green text over bright terrain disappears.
+    # GDI cannot outline a glyph, so the shadow is the text drawn in near-black offset by
+    # one pixel first. Without it, green text over bright terrain disappears.
     assert "SHADOW_COLOUR" in PANEL_SOURCE
-    assert "(-1, 0), (1, 0), (0, -1), (0, 1)" in PANEL_SOURCE
+    assert "(left + 1, top + 1," in PANEL_SOURCE
     assert "text_shadow: bool = False" in PANEL_SOURCE
 
 

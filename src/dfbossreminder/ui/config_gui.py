@@ -59,6 +59,7 @@ def form_from_settings(settings: Settings) -> dict:
             for entry in settings.whitelist
         ],
         "font_size": settings.font_size,
+        "font_weight": settings.font_weight,
         "font_face": settings.font_face,
         "opacity": settings.opacity,
         "text_shadow": settings.text_shadow,
@@ -139,7 +140,8 @@ def payload_from_form(form: dict) -> dict:
         "show_all_without_player": bool(form.get("show_all_without_player")),
         "whitelist_mode": bool(form.get("whitelist_mode")),
         "whitelist": whitelist,
-        "font_size": _int(form.get("font_size"), 12),
+        "font_size": _int(form.get("font_size"), 10),
+        "font_weight": _int(form.get("font_weight"), 300),
         "font_face": str(form.get("font_face", "")).strip(),
         "opacity": _float(form.get("opacity"), 0.0),
         "text_shadow": bool(form.get("text_shadow")),
@@ -296,6 +298,7 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
     # ------------------------------------------------------------- appearance
     appearance = section("Readout appearance")
     entry(appearance, "Font size (px)", "font_size", value=settings.font_size)
+    entry(appearance, "Font weight (100-900)", "font_weight", value=settings.font_weight)
     entry(appearance, "Font face (blank = pick one)", "font_face", width=24,
           value=settings.font_face)
     entry(appearance, "Background opacity (0 = see-through)", "opacity", value=settings.opacity)

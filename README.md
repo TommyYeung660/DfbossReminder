@@ -27,9 +27,9 @@ Secronom Bunker | 1054 x 987 | 3LU30
 
 The list is drawn in **the client's own HUD font** and **right-aligned** against the
 minimap, at 10 px with a **fully transparent background** — only the glyphs are
-painted, with a dark shadow behind them so they stay readable over bright ground. The
-header, the notes and the status are in Chinese by default (`--language en` for
-English); the boss lines themselves are the fixed format above.
+painted, with a single dark drop shadow behind them so they stay readable over bright
+ground. The header, the notes and the status are in Chinese by default (`--language en`
+for English); the boss lines themselves are the fixed format above.
 
 ### Where the font comes from
 
@@ -49,6 +49,13 @@ VIPER NORA has no CJK glyphs, so the Chinese header and notes are drawn in a
 CJK-capable face instead; each row picks by its own content, which is why the boss
 lines look exactly like the game while the notes stay readable. `--font` overrides the
 face, and `--no-game-font` uses an installed font only.
+
+The face ships **one weight**, so `--font-weight` cannot make the text lighter than
+the font is: weights 100 through 500 were measured to draw byte-identical pixels on
+the game PC, and 700 and up make GDI synthesise a heavier face. The default 300 is
+therefore the lightest this font gets — the readout reports the number it asked for
+next to the one GDI gave back rather than claiming the strokes weigh that much, and
+`tools/pc/probe-font-weight.py` is what measured it.
 
 A normal boss is one you walk to, so the third field is where it is from you:
 ``5LD1`` is five blocks left and one down, and ``U``/``D`` are up and down on the

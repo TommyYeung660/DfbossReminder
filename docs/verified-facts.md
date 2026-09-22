@@ -112,6 +112,24 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | **VIPER NORA has no CJK glyphs**, so the Chinese labels cannot be drawn in it - the header and notes would be a row of empty boxes beside boss lines that look perfect. Two faces are kept and each row picks by its content | Recorded live | the render probe drew 個附近 as boxes; the capture shows the Chinese rows in MS Gothic |
 | The readout is right-aligned, so its rows share a right edge with the minimap | Recorded live | the same capture |
 
+### Verified on the game PC, 2026-09-22 (fifth session: font weight and the shadow)
+
+The player asked for `font-weight: 300`, and answering that honestly needed a
+measurement rather than a read of the font's metadata. `tools/pc/probe-font-weight.py`
+draws one identical line through the overlay's own drawing code, at seven weights and
+three shadow styles, and compares the raw 32-bit surfaces.
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| The extracted font declares **one face**: `OS/2 usWeightClass 400`, `head macStyle 0`, `name[2] "Regular"` | Recorded live | read out of `~/.dfbossreminder/game-font.ttf` (480,148 bytes) |
+| **Weights 100 through 500 draw byte-identical surfaces** — one MD5 and 2,562 ink pixels for all five, at every shadow style | Recorded live | `docs/evidence/2026-09-22-font-weight-probe.txt`; cross-checked independently by diffing the probe's dumped BMPs with Pillow, which finds no differing pixel |
+| So `300` is **at the floor**, not "lighter than 400": it renders exactly the 400 raster, and asking for less buys nothing | Recorded live | the same probe |
+| **From 700 GDI synthesises a heavier face** (2,680 ink pixels against 2,562), although the family has no bold: 700 and 900 are identical to each other and both differ from the 100–500 band | Recorded live | the same probe |
+| GDI **echoes the requested weight back** through `GetObjectW` (`weight=300 (asked 300)`) even though the raster is the font's single face. The read-back is therefore reported as what was *recorded*, never as evidence of the drawn strokes | Recorded live | the probe's `asked` and `back` columns agree in all 21 rows |
+| The four-offset shadow **put dark fringe on all four sides of every glyph**: 141 more pixels than a single offset at weight 300 (2,703 against 2,562 ink, 6% more ink) | Recorded live | the same probe |
+| The lightening the player asked for is therefore real, and comes from the **single drop shadow** — the weight number provably changes nothing in that range | Recorded live | `docs/evidence/2026-09-22-overlay-weight-shadow-comparison.png`: the same text in the same font, `weight 400 + four offsets` above `weight 300 + one offset` |
+| The readout over the client at the shipped settings: `font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on` | Recorded live | `docs/evidence/2026-09-22-overlay-weight300-run.txt` and `…-overlay-weight300-on-client.png` |
+
 ### Defects the live run found, and the fixes
 
 Running it on Windows was worth it for these alone: none was visible from the
@@ -126,6 +144,7 @@ development machine or from any test.
 | The title was cut mid-word (`… 1057,1017  …`) | The title was one fixed string, wider than the narrow strip | The longest form that fits is used, dropping the account name first; a test checks the budget at every shipped width |
 | The **notes at the bottom of the list were clipped** by a fixed window height — the worst thing to lose, because the notes are what says whether an empty readout is correct or a bug | A height chosen before the content was known | The window sizes itself to its content up to a configured maximum, and anything over that is reported on the last line rather than vanishing |
 | With a transparent backing the **glyphs became invisible** | GDI does not write the alpha byte, so `alpha 0` pixels stayed `alpha 0` and `UpdateLayeredWindow` composited them away | The pixels this process drew are given a full alpha; the test is exact because the surface was cleared to zero first |
+| A second overlay in one process **failed to open** with only `RegisterClassW failed: 1410` to show for it | The window class was named after `id(self) & 0xFFFF` — addresses are reused, so the name was not the unique identity it looked like — and `close()` never unregistered the class | The name is `DFBossReminderOverlay<pid>_<counter>`, which cannot repeat, and `close()` calls `UnregisterClassW`; both are pinned by tests. Found by the weight probe, which opens 21 overlays in one process and hit the collision on its eighth |
 
 ## Open questions
 
@@ -154,3 +173,8 @@ development machine or from any test.
 9. Is `U`/`D` on the boss map the same way up as the client's own minimap? The
    encoding matches the player's example and the boss map's own orientation, but
    nobody has walked north and watched the field change.
+10. ~~Is `font-weight: 300` actually drawing lighter text?~~ **Answered: 300 is the
+   floor, not a lighter face** — 100 through 500 render byte-identically, and the
+   lightening came from the single drop shadow (fifth session, above). What is still
+   unmeasured is how the readout reads to the player's eye over busy terrain: ink and
+   the capture are proxies, and no one has said "that looks right now".

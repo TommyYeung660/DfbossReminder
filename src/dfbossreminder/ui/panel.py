@@ -23,6 +23,8 @@ contract tests run on a machine that has no ``user32`` at all.
 from __future__ import annotations
 
 import ctypes
+import itertools
+import os
 import struct
 import sys
 import unicodedata
@@ -94,6 +96,12 @@ FONT_FACE = "Consolas"
 LINE_GAP = 5
 TITLE_GAP = 8
 
+# A window class name has to be unique within the process, and it has to stay unique
+# after an overlay is closed and another opens. Deriving it from the object's address
+# only looked unique: addresses are reused, and a 16-bit slice of one collided often
+# enough that the second overlay of a run failed to open. A counter cannot repeat.
+_CLASS_SEQ = itertools.count(1)
+
 
 class _BLENDFUNCTION(ctypes.Structure):
     _fields_ = [("BlendOp", ctypes.c_ubyte), ("BlendFlags", ctypes.c_ubyte),
@@ -106,6 +114,18 @@ class _BITMAPINFOHEADER(ctypes.Structure):
                 ("biCompression", wintypes.DWORD), ("biSizeImage", wintypes.DWORD),
                 ("biXPelsPerMeter", ctypes.c_long), ("biYPelsPerMeter", ctypes.c_long),
                 ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
+
+
+class _LOGFONTW(ctypes.Structure):
+    """What ``GetObjectW`` fills in for a font, so the weight GDI chose can be read."""
+
+    _fields_ = [("lfHeight", ctypes.c_long), ("lfWidth", ctypes.c_long),
+                ("lfEscapement", ctypes.c_long), ("lfOrientation", ctypes.c_long),
+                ("lfWeight", ctypes.c_long), ("lfItalic", ctypes.c_byte),
+                ("lfUnderline", ctypes.c_byte), ("lfStrikeOut", ctypes.c_byte),
+                ("lfCharSet", ctypes.c_byte), ("lfOutPrecision", ctypes.c_byte),
+                ("lfClipPrecision", ctypes.c_byte), ("lfQuality", ctypes.c_byte),
+                ("lfPitchAndFamily", ctypes.c_byte), ("lfFaceName", ctypes.c_wchar * 32)]
 
 
 class _BITMAPINFO(ctypes.Structure):
@@ -194,6 +214,8 @@ def _bind():  # noqa: ANN202 - ctypes handles
     # overlay with "function not found".
     gdi32.GetTextFaceW.argtypes = [wintypes.HDC, ctypes.c_int, wintypes.LPWSTR]
     gdi32.GetTextFaceW.restype = ctypes.c_int
+    gdi32.GetObjectW.argtypes = [wintypes.HGDIOBJ, ctypes.c_int, ctypes.c_void_p]
+    gdi32.GetObjectW.restype = ctypes.c_int
     gdi32.AddFontResourceExW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
     gdi32.AddFontResourceExW.restype = ctypes.c_int
     gdi32.RemoveFontResourceExW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
@@ -233,6 +255,7 @@ class Overlay:
         text_shadow: bool = False,
         align: str = "right",
         cjk_face: str = "",
+        font_weight: int = 300,
     ) -> None:
         self.user32, self.gdi32 = _bind()
         self.width, self.height = int(width), int(height)
@@ -253,7 +276,10 @@ class Overlay:
         self.face_missing = False
         self.last_text_y = 0
         self.loaded_font_path = ""
-        self._class_name = f"DFBossReminderOverlay{id(self) & 0xFFFF}"
+        self.font_size = int(font_size)
+        self.font_weight = int(font_weight)
+        self.resolved_weight = 0
+        self._class_name = f"DFBossReminderOverlay{os.getpid()}_{next(_CLASS_SEQ)}"
 
         self._register_class()
         self.hwnd = self.user32.CreateWindowExW(
@@ -308,7 +334,6 @@ class Overlay:
             raise OSError("could not create the overlay's DIB section")
         self.gdi32.SelectObject(self.mem_dc, self.bitmap)
         self.gdi32.SetBkMode(self.mem_dc, TRANSPARENT)
-        self.font_size = font_size
         self.prefer_ascii = prefer_ascii
         candidates = FONT_CANDIDATES_ASCII if prefer_ascii else FONT_CANDIDATES
         # Two faces, because the client's own HUD font has no CJK glyphs: the boss
@@ -324,6 +349,7 @@ class Overlay:
         self.font = self._create_font(font_size, self.font_face)
         self.font_cjk = (self._create_font(font_size, self.cjk_face)
                          if self.cjk_face != self.font_face else self.font)
+        self.resolved_weight = self.resolved_weight_of(self.font)
         self.blend = _BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
 
     def set_face(self, face: str) -> None:
@@ -338,6 +364,7 @@ class Overlay:
         previous = self.font
         self.font_face = face
         self.font = self._create_font(self.font_size, face)
+        self.resolved_weight = self.resolved_weight_of(self.font)
         if previous and previous not in (0, self.font_cjk):
             self.gdi32.DeleteObject(previous)
         if self.cjk_face == face:
@@ -376,9 +403,36 @@ class Overlay:
             return buffer.value.strip()
         return None
 
-    def _create_font(self, size: int, face: str):  # noqa: ANN202 - HGDIOBJ
-        return self.gdi32.CreateFontW(-size, 0, 0, 0, 600, 0, 0, 0, DEFAULT_CHARSET,
-                                      0, 0, 0, 0, face)
+    def _create_font(self, size: int, face: str, weight: int | None = None):  # noqa: ANN202
+        """A font handle at the requested weight.
+
+        The number is a request. The client's HUD font declares one face (OS/2
+        ``usWeightClass`` 400, subfamily "Regular"), and ``tools/pc/probe-font-weight.py``
+        measured what that means on the game PC: weights 100 through 500 draw
+        byte-identical surfaces, so 300 is already the lightest this font can be rendered -
+        not "lighter than 400" but exactly the same raster. From 700 GDI synthesises a
+        heavier face. GDI still echoes the requested 300 back through ``GetObjectW``, which
+        is why the readout reports what was asked for beside what came back and never
+        claims the strokes weigh that much.
+
+        The lightening that is visible on screen came from the shadow: four offsets put
+        dark fringe on all four sides of every glyph, which at this size sits against every
+        stem and reads as emboldening. One offset keeps it on a single side.
+        """
+        return self.gdi32.CreateFontW(-size, 0, 0, 0,
+                                      self.font_weight if weight is None else weight,
+                                      0, 0, 0, DEFAULT_CHARSET, 0, 0, 0, 0, face)
+
+    def resolved_weight_of(self, font) -> int:  # noqa: ANN001
+        """The weight GDI actually selected for this handle, or 0 if it cannot be read."""
+        if not font:
+            return 0
+        info = _LOGFONTW()
+        try:
+            written = self.gdi32.GetObjectW(font, ctypes.sizeof(_LOGFONTW), ctypes.byref(info))
+        except (AttributeError, OSError):
+            return 0
+        return int(info.lfWeight) if written else 0
 
     def _face_exists(self, size: int, face: str) -> bool:
         """Whether GDI really gives us this face.
@@ -457,6 +511,7 @@ class Overlay:
                                  SWP_NOACTIVATE | SWP_SHOWWINDOW)
         self.face_missing = False
         self._create_buffer(size, face, prefer_ascii, cjk)
+        self.resolved_weight = self.resolved_weight_of(self.font)
         self.present()
 
     def move_to(self, left: int, top: int) -> None:
@@ -567,19 +622,27 @@ class Overlay:
 
     def _text(self, text: str, left: int, top: int, right: int, bottom: int,
               colour: tuple[int, int, int], flags: int) -> None:
-        """Draw a line, with a dark shadow first when there is no backing.
+        """Draw a line, with a dark drop shadow first when there is no backing.
 
         GDI cannot outline a glyph, so the shadow is the text drawn once in near-black
-        at four one-pixel offsets and then in its own colour on top. Without it, green
-        text with a fully transparent backing disappears over bright terrain - which is
-        the one thing that would make the transparent mode unusable.
+        offset by one pixel and then in its own colour on top. Without it, green text
+        with a fully transparent backing disappears over bright terrain - which is the
+        one thing that would make the transparent mode unusable.
+
+        One pixel, and one offset. Four offsets were measured to add 141 pixels of dark
+        fringe (6% more ink at weight 300) on every side of every glyph, which at 10 px
+        presses against every stem and is what a heavier weight looks like.
         """
         if self.text_shadow and not self.framed:
+            # One offset, not four, so the fringe stays on a single side of each glyph
+            # instead of pressing against every stem. A single drop shadow to the lower
+            # right is still enough to hold the glyphs against a bright background and
+            # leaves the apparent weight to the font, which at this size has no lighter
+            # face to offer (see _create_font).
             self.gdi32.SetTextColor(self.mem_dc, _rgb(SHADOW_COLOUR))
-            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                self.user32.DrawTextW(self.mem_dc, text, -1,
-                                      ctypes.byref(wintypes.RECT(left + dx, top + dy,
-                                                                 right + dx, bottom + dy)), flags)
+            self.user32.DrawTextW(self.mem_dc, text, -1,
+                                  ctypes.byref(wintypes.RECT(left + 1, top + 1,
+                                                             right + 1, bottom + 1)), flags)
         # The client's HUD face has no CJK glyphs, so a row with Chinese in it is drawn
         # in the face that does. Without this the header and the notes are a row of
         # empty boxes next to boss lines that look perfect.
@@ -644,7 +707,12 @@ class Overlay:
                    else "transparent backing (text only)")
         shadow = "; text shadow on" if (self.text_shadow and not self.framed) else ""
         cjk = f", CJK {self.cjk_face}" if self.cjk_face != self.font_face else ""
-        return (f"overlay visible={visible} at {where}{font}{cjk}; align={self.align}; "
+        # GDI echoes the requested weight back on this machine even when the family has
+        # a single face, so this line records what was asked for and what came back -
+        # it is deliberately not phrased as a claim about the drawn strokes.
+        weight = (f"; weight={self.resolved_weight} (asked {self.font_weight})"
+                  if self.resolved_weight else "")
+        return (f"overlay visible={visible} at {where}{font}{cjk}{weight}; align={self.align}; "
                 f"{backing}{shadow}")
 
     def dump(self, path: str, backdrop: tuple[int, int, int] = (96, 96, 96)) -> str:
@@ -697,6 +765,13 @@ class Overlay:
         if self.hwnd:
             self.user32.DestroyWindow(wintypes.HWND(self.hwnd))
             self.hwnd = 0
+        # The class outlives the window, so it is released too. The name is unique to this
+        # instance (see _class_name), which is what makes this the owner's call and no one
+        # else's; a name derived from the object's address instead collided, and the
+        # unlucky second overlay failed to open with an opaque
+        # "RegisterClassW failed: 1410".
+        if self._class_name:
+            self.user32.UnregisterClassW(self._class_name, None)
 
 
 def anchored_overlay(

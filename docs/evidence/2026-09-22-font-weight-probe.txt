@@ -1,0 +1,38 @@
+font cache: C:\Users\tommy.yeung\.dfbossreminder\game-font.ttf (present)
+line: '1 x Evolved Longarms + 1 x Irradiated | 1054 x 1016 | 3LU1'
+
+shadow   asked  back     ink  face          md5
+single     100   100    2562  VIPER NORA    5a1bb1e8a678
+single     200   200    2562  VIPER NORA    5a1bb1e8a678
+single     300   300    2562  VIPER NORA    5a1bb1e8a678
+single     400   400    2562  VIPER NORA    5a1bb1e8a678
+single     500   500    2562  VIPER NORA    5a1bb1e8a678
+single     700   700    2680  VIPER NORA    90f1540149af
+single     900   900    2680  VIPER NORA    90f1540149af
+four       100   100    2703  VIPER NORA    bb44c80c8fd1
+four       200   200    2703  VIPER NORA    bb44c80c8fd1
+four       300   300    2703  VIPER NORA    bb44c80c8fd1
+four       400   400    2703  VIPER NORA    bb44c80c8fd1
+four       500   500    2703  VIPER NORA    bb44c80c8fd1
+four       700   700    2869  VIPER NORA    a2ec22764399
+four       900   900    2869  VIPER NORA    a2ec22764399
+none       100   100    2109  VIPER NORA    4d4713113201
+none       200   200    2109  VIPER NORA    4d4713113201
+none       300   300    2109  VIPER NORA    4d4713113201
+none       400   400    2109  VIPER NORA    4d4713113201
+none       500   500    2109  VIPER NORA    4d4713113201
+none       700   700    2264  VIPER NORA    4e96f45cd7d6
+none       900   900    2264  VIPER NORA    4e96f45cd7d6
+
+[shadow=single] 2 distinct renders across 7 weights: 100-500 render identically (ink 2562, GDI reports [100, 200, 300, 400, 500]), 700-900 render identically (ink 2680, GDI reports [700, 900])
+    -> the 100-500 band is the lightest this font can be drawn; a request below it buys nothing and 700+ makes GDI synthesise a heavier face
+[shadow=four] 2 distinct renders across 7 weights: 100-500 render identically (ink 2703, GDI reports [100, 200, 300, 400, 500]), 700-900 render identically (ink 2869, GDI reports [700, 900])
+    -> the 100-500 band is the lightest this font can be drawn; a request below it buys nothing and 700+ makes GDI synthesise a heavier face
+[shadow=none] 2 distinct renders across 7 weights: 100-500 render identically (ink 2109, GDI reports [100, 200, 300, 400, 500]), 700-900 render identically (ink 2264, GDI reports [700, 900])
+    -> the 100-500 band is the lightest this font can be drawn; a request below it buys nothing and 700+ makes GDI synthesise a heavier face
+
+the weight the readout uses (300) is inside the lightest band (100-500): it is at the floor, not merely below some heavier face
+ink at weight 300: no shadow 2109, single 2562 (1.21x), four-offset 2703 (1.28x)
+the four-offset shadow surrounds every glyph with dark fringe on all four sides: 141 more pixels than the single offset (6% more ink), and the single offset keeps the fringe on one side only
+
+wrote surfaces to tools\pc\evidence\weight-probe

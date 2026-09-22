@@ -98,7 +98,7 @@ def test_every_documented_field_survives_the_round_trip_unchanged() -> None:
         "poll_seconds": 45, "stale_seconds": 300, "presentation": "panel",
         "anchor": "bottom-right", "offset_x": 20, "offset_y": 30, "width": 500,
         "height": 300, "max_rows": 20, "direction_style": "en",
-        "font_face": "MS Gothic", "font_size": 15, "opacity": 0.5,
+        "font_face": "MS Gothic", "font_size": 15, "font_weight": 500, "opacity": 0.5,
         "game_font": False, "align": "left",
         "colours": {"list": "#00FF00", "big": "#FFFF00", "title": "#00AA00",
                     "note": "#888888", "background": "#000000", "border": "#333333"},
@@ -194,3 +194,11 @@ def test_the_game_font_is_on_by_default_and_round_trips() -> None:
     settings = parse_settings({"game_font": False})
     assert settings.game_font is False
     assert parse_settings(to_dict(settings)).game_font is False
+
+
+def test_the_font_weight_defaults_to_light_and_is_clamped() -> None:
+    assert Settings().font_weight == 300
+    assert parse_settings({"font_weight": 400}).font_weight == 400
+    assert parse_settings({"font_weight": 50}).font_weight == 100
+    assert parse_settings({"font_weight": 5000}).font_weight == 900
+    assert parse_settings({"font_weight": "bold"}).font_weight == 300

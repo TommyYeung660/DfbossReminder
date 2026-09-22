@@ -141,6 +141,9 @@ def apply_overrides(settings: Settings, args: argparse.Namespace) -> tuple[Setti
     if args.font_size is not None:
         updates["font_size"] = args.font_size
         changed = True
+    if args.font_weight is not None:
+        updates["font_weight"] = args.font_weight
+        changed = True
     if args.opacity is not None:
         updates["opacity"] = args.opacity
         changed = True
@@ -309,6 +312,7 @@ class OverlayPresenter:
                                border=self.settings.colour("border"),
                                title_colour=self.settings.colour("title"),
                                font_size=self.settings.font_size,
+                               font_weight=self.settings.font_weight,
                                font_face=self.settings.font_face,
                                prefer_ascii=self.settings.direction_style == "en",
                                text_shadow=self.settings.text_shadow,
@@ -646,6 +650,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, metavar="PX", help="readout height in pixels")
     parser.add_argument("--font-size", type=int, metavar="PX",
                         help="readout font size in pixels (default 10)")
+    parser.add_argument("--font-weight", type=int, metavar="100-900",
+                        help="readout font weight (default 300; the client's font has one "
+                             "face and 100-500 all render the same, so 300 is the floor, "
+                             "and the resolved weight is reported)")
     parser.add_argument("--opacity", type=float, metavar="0-1",
                         help="readout backing opacity; 0 is fully transparent")
     parser.add_argument("--text-shadow", choices=("on", "off"),
