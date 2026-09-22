@@ -12,6 +12,9 @@ here is an implementation fact at best.
 | `2026-09-22-overlay-surface.png` | The pixels the overlay itself handed to `UpdateLayeredWindow` on the game PC, with the zh bearing words rendering and the minutes column intact |
 | `2026-09-22-overlay-over-game-client.png` | The game's client area (`1280x720` at `242,134`) photographed from the desktop while the overlay was up: the readout sits over the game, and the game's own minimap reads `1057 X 1017` — the same block the readout's header shows |
 | `2026-09-22-window-probe.txt` | `tools/pc/probe-window.py` output: the client-rectangle measurement is correct on that display, and the game window is found at `1280x720` at `(242,134)` |
+| `2026-09-22-exe-build.txt` | `tools/pc/build-exe.cmd` building both exes onto the Desktop |
+| `2026-09-22-built-exe-once.txt` | The built `DFBossReminder.exe` printing the live plan, so the packaged build works and not only the source |
+| `2026-09-22-built-config-exe.txt` | The built `DFBossReminderConfig.exe` opening its settings window |
 | `2026-09-22-overlay-below-minimap-on-client.png` | The final arrangement: the game's client area with its own minimap (`BUNKER`, `1057 X 1017`) at the top-right and the bright green boss list hanging directly below it — big bosses with their end time, ordinary ones with a compact bearing |
 | `2026-09-22-overlay-below-minimap-formats.png` | The readout's own pixels at a readable size, showing both line formats (`Charred Titan \| 1048 x 1018 \| 17:00` and `3 x Mega Mother \| 1057 x 1016 \| U1`) |
 | `2026-09-22-overlay-below-minimap-run.txt` | The whole run as the game PC printed it: the game window's rectangle, the readout's own `(1177,363)-(1517,583)`, the font, the hotkey, and both captures written |

@@ -1,0 +1,30 @@
+DFB interactive run 22/09/2026 ¶g¤G 16:35:48.16
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1790066148-72380
+DFBossReminder.exe
+DFBossReminderConfig.exe
+settings saved to C:\Users\tommy.yeung\.dfbossreminder\settings.json
+DFBossReminder  1057,1017  27 nearby
+  3 x Mega Mother | 1057 x 1016 | U1
+  6 x Bandits | 1055 x 1017 | 2L
+  1 x Evolved Longarms ¡K | 1054 x 1016 | 3LU1
+  6 x Bandits | 1054 x 1018 | 3LD1
+  6 x Bandits | 1054 x 1019 | 3LD2
+  1 x Evolved Longarms ¡K | 1053 x 1018 | 4LD1
+  6 x Bandits | 1052 x 1017 | 5L
+  6 x Bandits | 1052 x 1016 | 5LU1
+  6 x Bandits | 1051 x 1016 | 6LU1
+  1 x Charred Titan | 1048 x 1018 | 9LD1
+  1 x Charred Titan | 1047 x 1012 | 10LU5
+  1 x Charred Titan | 1048 x 1007 | 9LU10
+  1 x Charred Titan | 1046 x 1017 | 11L
+  4 x Bandits | 1051 x 1006 | 6LU11
+  Secronom Bunker | 1054 x 987 | 3LU30
+  updated 0s ago
+  within 20 blocks
+  154 beyond the radius
+  13 more not shown
+EXITCODE=0
+
+EXITCODE=0

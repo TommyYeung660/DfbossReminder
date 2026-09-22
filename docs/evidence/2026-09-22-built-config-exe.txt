@@ -1,0 +1,12 @@
+DFB interactive run 22/09/2026 ¶g¤G 16:36:16.02
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1790066175-73108
+starting: C:\Users\tommy.yeung\Desktop\DFBossReminderConfig.exe
+found the settings window: hwnd=0x2f0bce visible=True (182,182)-(918,981)
+size: 736 x 799
+game running: yes (the settings window must open either way)
+PASS: the settings window opens, with no game required
+EXITCODE=0
+
+EXITCODE=0

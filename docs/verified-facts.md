@@ -82,6 +82,7 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | `5LD1` is the right encoding: the player at `1057,1017` and a boss at `1052,1018` is five blocks left and one down | Recorded live | the hand-written example, reproduced by the code and pinned by a test |
 | Big/ultra bosses lead the list, so a special spawn is not buried under nearer ordinary ones | Implementation fact | `domain/plan.py`, `tests/test_view.py` |
 | The settings window opens on the game PC: a visible `736x799` window titled `DFBossReminder settings` | Recorded live | `tools/pc/probe-config-gui.py` |
+| **The built exes run**, not just the source: `Desktop\DFBossReminder.exe --once` prints the live plan, and `Desktop\DFBossReminderConfig.exe` opens its `736x799` window | Recorded live | `docs/evidence/2026-09-22-built-exe-once.txt`, `…-built-config-exe.txt` |
 | The settings window needs no game: it was opened while the client was running, and the probe reports the client's state rather than requiring either answer | Recorded live | same probe |
 | The overlay is refused when the game is not running, and the refusal is not swallowed by the console fallback | Implementation fact | `tests/test_app.py`, `app.GameNotRunning` |
 | The tier is a **name list**, because the boss map carries no tier; the default is the wiki's Special Daily Bosses | Wiki-sourced | *Bosses*, threat levels 1–8 plus "Special Daily Bosses … extra tough … once per day … stay for 3 hours instead of the normal bosses' 1 hour" |

@@ -13,6 +13,7 @@ Usage (game PC, inside the interactive session):
 
 from __future__ import annotations
 
+import argparse
 import ctypes
 import subprocess
 import sys
@@ -25,6 +26,11 @@ WINDOW_TITLE = "DFBossReminder settings"
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--exe", default="",
+                        help="test a built DFBossReminderConfig.exe instead of the source")
+    args = parser.parse_args()
+
     if sys.platform != "win32":
         print("this probe only runs on Windows", file=sys.stderr)
         return 1
@@ -41,11 +47,15 @@ def main() -> int:
     # install, and the message should say so rather than "no window appeared".
     import importlib.util
 
-    if importlib.util.find_spec("tkinter") is None:
+    exe = args.exe
+    if exe and not Path(exe).exists():
+        print(f"FAIL: no file at {exe}")
+        return 1
+    if not exe and importlib.util.find_spec("tkinter") is None:
         print("FAIL: this Python has no tkinter, so the settings window cannot open")
         return 1
 
-    command = [sys.executable, str(PROJECT_ROOT / "tools" / "dfboss_config_main.py")]
+    command = [exe] if exe else [sys.executable, str(PROJECT_ROOT / "tools" / "dfboss_config_main.py")]
     print(f"starting: {' '.join(command)}")
     process = subprocess.Popen(command, cwd=str(PROJECT_ROOT))
 
@@ -69,6 +79,8 @@ def main() -> int:
     print(f"size: {rect.right - rect.left} x {rect.bottom - rect.top}")
 
     # It must work with the game shut, so this is reported, not required.
+    # The probe itself always needs the package, whether it is testing the exe or the
+    # source: the exe bundles its own copy, but this script runs under system Python.
     sys.path.insert(0, str(PROJECT_ROOT / "src"))
     from dfbossreminder.services.window import find_game_window  # noqa: E402
 
