@@ -75,6 +75,11 @@ FONT_CANDIDATES = ("MingLiU", "MS Gothic", "SimSun", "Microsoft JhengHei", "Cons
 FONT_CANDIDATES_ASCII = ("Consolas", "Courier New")
 
 DEFAULT_BACKGROUND = (14, 13, 11, 214)
+# Near-black rather than pure black, and not a style choice: with a transparent
+# backing the glyphs are made opaque by the rule "anything we drew has a non-zero
+# colour" (see ``_opaque_glyphs``), so a pure black shadow would be drawn and then
+# thrown away.
+SHADOW_COLOUR = (12, 12, 12)
 DEFAULT_BORDER = (46, 74, 46)
 DEFAULT_TITLE = (25, 200, 25)
 FONT_FACE = "Consolas"
@@ -208,6 +213,7 @@ class Overlay:
         font_size: int = 14,
         font_face: str = "",
         prefer_ascii: bool = False,
+        text_shadow: bool = False,
     ) -> None:
         self.user32, self.gdi32 = _bind()
         self.width, self.height = int(width), int(height)
@@ -215,11 +221,17 @@ class Overlay:
         self.background = background
         self.border = border
         self.title_colour = title_colour
+        self.text_shadow = text_shadow
+        # A fully transparent backing means the readout is text only: a frame or a
+        # title rule with nothing behind it is just stray lines over the game, so both
+        # are dropped rather than left floating.
+        self.framed = background[3] > 0
         self.line_height = max(10, int(font_size) + LINE_GAP)
         self.title_height = max(14, int(font_size) + TITLE_GAP)
         self._rows: tuple[Row, ...] = ()
         self._title = ""
         self.face_missing = False
+        self.last_text_y = 0
         self._class_name = f"DFBossReminderOverlay{id(self) & 0xFFFF}"
 
         self._register_class()
@@ -275,6 +287,7 @@ class Overlay:
         self.gdi32.SelectObject(self.mem_dc, self.bitmap)
         self.gdi32.SetBkMode(self.mem_dc, TRANSPARENT)
         self.font_size = font_size
+        self.prefer_ascii = prefer_ascii
         candidates = FONT_CANDIDATES_ASCII if prefer_ascii else FONT_CANDIDATES
         self.font_face = font_face or self._pick_face(font_size, candidates)
         self.font = self._create_font(font_size, self.font_face)
@@ -316,6 +329,48 @@ class Overlay:
         self.face_missing = True
         return candidates[-1]
 
+    def _release_buffer(self) -> None:
+        for handle, delete in ((self.bitmap, self.gdi32.DeleteObject),
+                               (self.font, self.gdi32.DeleteObject)):
+            if handle:
+                delete(handle)
+        self.bitmap = 0
+        self.font = 0
+        if self.mem_dc:
+            self.gdi32.DeleteDC(self.mem_dc)
+            self.mem_dc = 0
+
+    def height_for(self, rows: int) -> int:
+        """The window height these rows need, so the content is never clipped.
+
+        A fixed height silently dropped whatever did not fit - the diagnostic notes
+        were the first thing to go, which is the worst thing to lose, because the notes
+        are what tell a correct empty list apart from a broken one.
+        """
+        return self.title_height + rows * self.line_height + 5
+
+    def resize(self, left: int, top: int, width: int, height: int) -> None:
+        """Reposition and resize without activating, rebuilding the surface.
+
+        The off-screen buffer is sized to the window, so a new height needs a new DIB.
+        The font face is kept rather than re-probed: the probe is a per-machine answer
+        and asking again on every resize would be both slow and a possible flip.
+        """
+        if (left, top, width, height) == (self.left, self.top, self.width, self.height):
+            return
+        face = self.font_face
+        size = self.font_size
+        prefer_ascii = self.prefer_ascii
+        self._release_buffer()
+        self.left, self.top = int(left), int(top)
+        self.width, self.height = int(width), int(height)
+        self.user32.SetWindowPos(wintypes.HWND(self.hwnd), wintypes.HWND(HWND_TOPMOST),
+                                 self.left, self.top, self.width, self.height,
+                                 SWP_NOACTIVATE | SWP_SHOWWINDOW)
+        self.face_missing = False
+        self._create_buffer(size, face, prefer_ascii)
+        self.present()
+
     def move_to(self, left: int, top: int) -> None:
         """Follow the client rectangle without resizing, activating, or stacking."""
         self.left, self.top = int(left), int(top)
@@ -343,10 +398,19 @@ class Overlay:
 
     def present(self) -> None:
         """Redraw the remembered content into the surface and update the window."""
-        self._fill(self.background)
-        self._outline()
+        if self.framed:
+            self._fill(self.background)
+            self._outline()
+        else:
+            self._clear()
         self._draw_text()
+        self._opaque_glyphs()
         self._update_layered_window()
+
+    def _clear(self) -> None:
+        """Every pixel fully transparent, so only the glyphs are drawn."""
+        buffer = (ctypes.c_ubyte * (self.width * self.height * 4)).from_address(self.bits)
+        ctypes.memset(buffer, 0, len(buffer))
 
     def _fill(self, colour: tuple[int, int, int, int]) -> None:
         red, green, blue, alpha = colour
@@ -380,19 +444,57 @@ class Overlay:
 
     def _draw_text(self) -> None:
         self.gdi32.SelectObject(self.mem_dc, self.font)
-        self.gdi32.SetTextColor(self.mem_dc, _rgb(self.title_colour))
-        self.user32.DrawTextW(self.mem_dc, self._title, -1,
-                             ctypes.byref(wintypes.RECT(8, 2, self.width - 8, self.title_height)),
-                             DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS)
+        flags = DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS
+        self._text(self._title, 8, 2, self.width - 8, self.title_height, self.title_colour, flags)
         y = self.title_height + 3
         for row in self._rows:
             if y + self.line_height > self.height - 2:
                 break
-            self.gdi32.SetTextColor(self.mem_dc, _rgb(row.colour))
-            self.user32.DrawTextW(self.mem_dc, row.text, -1,
-                                  ctypes.byref(wintypes.RECT(8, y, self.width - 8, y + self.line_height)),
-                                  DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS)
+            self._text(row.text, 8, y, self.width - 8, y + self.line_height, row.colour, flags)
             y += self.line_height
+        # Remembered so the alpha pass only walks the rows that can hold glyphs.
+        self.last_text_y = y
+
+    def _opaque_glyphs(self) -> None:
+        """Give every pixel we drew a full alpha.
+
+        GDI draws text into a 32-bit DIB *without touching the alpha byte*. On an
+        opaque surface that is harmless - the backing already left 255 there - but on a
+        cleared surface, where every pixel is ``alpha 0``, the glyphs would be drawn and
+        then be invisible, because ``UpdateLayeredWindow`` composites by alpha.
+
+        The test is exact rather than a guess: the surface was cleared to zero and the
+        only thing drawn on it is the text, so a pixel with any non-zero colour channel
+        is ours. Only the rows the text reached are scanned, which keeps a frame cheap.
+        """
+        if self.framed:
+            return          # the backing already put 255 in the alpha byte
+        for y in range(max(0, self.title_height - 2), self.last_text_y + 1):
+            base = y * self.width * 4
+            row = (ctypes.c_ubyte * (self.width * 4)).from_address(self.bits + base)
+            for x in range(self.width):
+                offset = x * 4
+                if row[offset] or row[offset + 1] or row[offset + 2]:
+                    row[offset + 3] = 255
+
+    def _text(self, text: str, left: int, top: int, right: int, bottom: int,
+              colour: tuple[int, int, int], flags: int) -> None:
+        """Draw a line, with a dark shadow first when there is no backing.
+
+        GDI cannot outline a glyph, so the shadow is the text drawn once in near-black
+        at four one-pixel offsets and then in its own colour on top. Without it, green
+        text with a fully transparent backing disappears over bright terrain - which is
+        the one thing that would make the transparent mode unusable.
+        """
+        if self.text_shadow and not self.framed:
+            self.gdi32.SetTextColor(self.mem_dc, _rgb(SHADOW_COLOUR))
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                self.user32.DrawTextW(self.mem_dc, text, -1,
+                                      ctypes.byref(wintypes.RECT(left + dx, top + dy,
+                                                                 right + dx, bottom + dy)), flags)
+        self.gdi32.SetTextColor(self.mem_dc, _rgb(colour))
+        self.user32.DrawTextW(self.mem_dc, text, -1,
+                              ctypes.byref(wintypes.RECT(left, top, right, bottom)), flags)
 
     def _update_layered_window(self) -> None:
         size = wintypes.SIZE(self.width, self.height)
@@ -446,14 +548,24 @@ class Overlay:
         placed = bool(self.user32.GetWindowRect(wintypes.HWND(self.hwnd), ctypes.byref(rect)))
         where = (f"({rect.left},{rect.top})-({rect.right},{rect.bottom})" if placed else "unreadable")
         font = f"; font={self.font_face}" + (" (no CJK face found)" if self.face_missing else "")
-        return f"overlay visible={visible} at {where}{font}"
+        backing = (f"opaque alpha={self.background[3]}" if self.framed
+                   else "transparent backing (text only)")
+        shadow = "; text shadow on" if (self.text_shadow and not self.framed) else ""
+        return f"overlay visible={visible} at {where}{font}; {backing}{shadow}"
 
-    def dump(self, path: str) -> str:
+    def dump(self, path: str, backdrop: tuple[int, int, int] = (96, 96, 96)) -> str:
         """Write the surface the overlay is presenting, as a 24-bit BMP.
 
         A layered window is not reproduced by a screen capture on every display
         configuration, so "what is the overlay drawing" cannot be answered by
         photographing the desktop. This writes the same pixels the window receives.
+
+        BMP has no alpha channel, so the surface is composited over ``backdrop``
+        (mid-grey by default). With a transparent backing the glyphs would otherwise
+        be drawn on pure black and the whole surface would look like an opaque black
+        rectangle, which is the opposite of what is being presented. The window's own
+        ``background alpha`` is reported by :meth:`describe`, and the screenshot over
+        the game is what actually shows the transparency.
         """
         raw = ctypes.string_at(self.bits, self.width * self.height * 4)
         row_size = ((self.width * 3 + 3) // 4) * 4
@@ -463,7 +575,17 @@ class Overlay:
             row = bytearray()
             for x in range(self.width):
                 offset = start + x * 4
-                row += bytes((raw[offset + 2], raw[offset + 1], raw[offset]))
+                blue, green, red, alpha = raw[offset:offset + 4]
+                if alpha == 255:
+                    row += bytes((red, green, blue))
+                else:
+                    # Premultiplied BGRA, so the source terms are the stored channels.
+                    # Clamped: a diagnostic must not be able to fail on a pixel.
+                    inverse = 255 - alpha
+                    row += bytes((
+                        min(255, red + backdrop[0] * inverse // 255),
+                        min(255, green + backdrop[1] * inverse // 255),
+                        min(255, blue + backdrop[2] * inverse // 255)))
             row += bytes(row_size - len(row))
             pixels += row
         header = struct.pack("<2sIHHI", b"BM", 14 + 40 + len(pixels), 0, 0, 14 + 40)
@@ -474,15 +596,7 @@ class Overlay:
         return path
 
     def close(self) -> None:
-        for handle, delete in ((self.bitmap, self.gdi32.DeleteObject),
-                               (self.font, self.gdi32.DeleteObject)):
-            if handle:
-                delete(handle)
-        self.bitmap = 0
-        self.font = 0
-        if self.mem_dc:
-            self.gdi32.DeleteDC(self.mem_dc)
-            self.mem_dc = 0
+        self._release_buffer()
         if getattr(self, "screen_dc", None):
             self.user32.ReleaseDC(None, self.screen_dc)
             self.screen_dc = 0

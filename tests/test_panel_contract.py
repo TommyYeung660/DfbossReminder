@@ -151,3 +151,37 @@ def test_the_unavailable_path_is_reported_rather_than_hidden() -> None:
 
     source = inspect.getsource(app.make_presenter)
     assert "falling back to the console" in source
+
+
+def test_a_transparent_backing_draws_no_frame() -> None:
+    # With nothing behind it, a border and a title rule are stray lines over the game,
+    # so they are dropped rather than left floating; the surface is cleared instead.
+    assert "self.framed = background[3] > 0" in PANEL_SOURCE
+    assert "if self.framed:" in PANEL_SOURCE
+    assert "_clear()" in PANEL_SOURCE
+
+
+def test_a_transparent_backing_shadows_the_text_instead() -> None:
+    # GDI cannot outline a glyph, so the shadow is the text drawn in near-black at four
+    # one-pixel offsets first. Without it, green text over bright terrain disappears.
+    assert "SHADOW_COLOUR" in PANEL_SOURCE
+    assert "(-1, 0), (1, 0), (0, -1), (0, 1)" in PANEL_SOURCE
+    assert "text_shadow: bool = False" in PANEL_SOURCE
+
+
+def test_the_line_metrics_follow_the_configured_font_size() -> None:
+    # A pinned line height would clip a larger font or space a smaller one out, and the
+    # font size is a user setting.
+    assert "line_height = max(10, int(font_size) + LINE_GAP)" in PANEL_SOURCE
+    assert "rows_fitting" in PANEL_SOURCE
+
+
+def test_a_cleared_surface_gets_its_glyph_pixels_made_opaque_again() -> None:
+    # GDI draws into a 32-bit DIB without touching the alpha byte, so on a cleared
+    # surface the glyphs would be drawn and then be invisible, because
+    # UpdateLayeredWindow composites by alpha. This is the fix, and the shadow colour is
+    # non-black because the test for "we drew this pixel" is a non-zero colour.
+    assert "_opaque_glyphs" in PANEL_SOURCE
+    assert "row[offset + 3] = 255" in PANEL_SOURCE
+    assert panel_module.SHADOW_COLOUR != (0, 0, 0)
+    assert "last_text_y" in PANEL_SOURCE

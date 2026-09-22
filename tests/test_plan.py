@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dfbossreminder.domain.bosses import parse_bossmap
 from dfbossreminder.domain.geometry import Block
-from dfbossreminder.domain.plan import build_plan, waypoint_rows
+from dfbossreminder.domain.plan import Note, build_plan, waypoint_rows
 from dfbossreminder.domain.settings import parse_settings
 
 NOW = 10_000.0
@@ -48,7 +48,7 @@ def test_only_bosses_within_the_radius_are_shown() -> None:
     names = [row.name for row in plan.rows]
     assert names == ["Near", "Edge"]
     assert plan.beyond_radius == 1
-    assert "within 5 blocks" in plan.notes
+    assert Note("within", (("radius", 5),)) in plan.notes
 
 
 def test_the_radius_is_dynamic_because_it_is_a_setting() -> None:
@@ -97,7 +97,7 @@ def test_whitelist_mode_with_an_empty_whitelist_shows_nothing_and_says_so() -> N
     plan = build_plan(events({"name": "Any", "blocks": [(1000, 1000)]}), player,
                       parse_settings({"whitelist_mode": True}), NOW)
     assert plan.rows == ()
-    assert any("whitelist is empty" in note for note in plan.notes)
+    assert Note("whitelist_empty") in plan.notes
 
 
 def test_whitelist_mode_ignores_the_radius_for_a_watched_boss() -> None:
@@ -135,7 +135,7 @@ def test_with_no_player_position_everything_is_listed_with_a_note() -> None:
     assert [row.name for row in plan.rows] == ["A"]
     assert plan.rows[0].distance is None
     assert plan.rows[0].direction("en") == "?"
-    assert "no player position" in plan.notes
+    assert Note("no_player") in plan.notes
 
 
 def test_with_no_player_position_the_plan_can_be_told_to_show_nothing() -> None:
@@ -143,7 +143,7 @@ def test_with_no_player_position_the_plan_can_be_told_to_show_nothing() -> None:
     settings = parse_settings({"show_all_without_player": False})
     plan = build_plan(found, None, settings, NOW)
     assert plan.rows == ()
-    assert "no player position" in plan.notes
+    assert Note("no_player") in plan.notes
 
 
 def test_a_very_close_boss_is_marked() -> None:
@@ -173,7 +173,7 @@ def test_the_row_cap_is_reported_rather_than_silent() -> None:
     assert len(plan.rows) == 2
     assert plan.shown == 2
     assert plan.nearby_sightings == 6
-    assert any("more not shown" in note for note in plan.notes)
+    assert Note("capped", (("count", 4),)) in plan.notes
 
 
 def test_one_event_with_many_blocks_becomes_one_row_per_nearby_block() -> None:
@@ -194,7 +194,7 @@ def test_missions_are_only_present_when_the_setting_asked_for_them() -> None:
     plan = build_plan(found, Block(1000, 1000),
                       parse_settings({"include_missions": True, "radius_blocks": 8}), NOW)
     assert plan.rows[0].is_mission
-    assert "missions included" in plan.notes
+    assert Note("missions") in plan.notes
 
 
 def test_the_waypoint_bearing_is_always_available() -> None:

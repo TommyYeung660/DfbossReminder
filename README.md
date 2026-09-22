@@ -2,7 +2,8 @@
 
 An overlay that tells you **which bosses are near the player right now**, on Dead
 Frontier's own map coordinates — a bright green boss list hanging off the bottom of
-the region minimap, inside the game's own window.
+the region minimap, inside the game's own window, with no backing box so the game
+shows through.
 
 This is a full rewrite of the old `DfbossReminder` (a Slack notifier driven by
 `dfprofiler.com/bossmap`), keeping the data source and rebuilding everything else
@@ -14,13 +15,20 @@ had it is `stable version 2.3`).
 ## The readout
 
 ```text
-DFBossReminder  1057,1017  27 nearby
-Charred Titan | 1048 x 1018 | 17:00
-6 x Bandits   | 1052 x 1018 | 5LD1
+DFBossReminder  tommy660  1057,1017  27 個附近
+1 x Charred Titan | 1048 x 1018 | 17:00
+6 x Bandits | 1052 x 1018 | 5LD1
 3 x Mega Mother | 1057 x 1016 | U1
 Secronom Bunker | 1054 x 987 | 3LU30
-within 20 blocks
+20 格內
+半徑外 154 個
+已更新 0 秒前
 ```
+
+The list is drawn at 10 px with a **fully transparent background** — only the glyphs
+are painted, with a dark shadow behind them so they stay readable over bright ground.
+The header, the notes and the status are in Chinese by default (`--language en` for
+English); the boss lines themselves are the fixed format above.
 
 A normal boss is one you walk to, so the third field is where it is from you:
 ``5LD1`` is five blocks left and one down, and ``U``/``D`` are up and down on the
@@ -67,18 +75,20 @@ cannot be compared with a map coordinate at all. See `docs/system-design.md` D2.
 
 | Piece | State |
 | --- | --- |
-| Domain (blocks, boss map parsing, whitelist, settings, plan) | **165 tests pass** on the development machine |
+| Domain (blocks, boss map parsing, whitelist, settings, plan) | **180 tests pass** on the development machine |
 | Profiler client (boss map, profile `gpscoords`) | **Verified live** against `dfprofiler.com` |
 | Console presentation, polling loop, settings persistence, `--once`, `--json` | **Verified live** on the game PC |
 | The overlay window and the client-rectangle locator | **Verified live on the game PC, 2026-09-22**: it appears over the client area, clicks pass through, and it does not take focus |
 | The below-minimap placement, both line formats, and the settings window | **Verified live on the game PC, 2026-09-22** — see `docs/evidence/2026-09-22-overlay-below-minimap-on-client.png` |
 | The refusal when the game is not running | **Unit-tested, not verified live** — the client was running during every session and closing it would have cost the player their game |
+| The transparent 10 px readout, the Chinese labels and the content-sized window | **Verified live on the game PC, 2026-09-22** — see `docs/evidence/2026-09-22-overlay-transparent-on-client.png` |
 
-The live Windows runs found five defects no test on the development machine could
+The live Windows runs found seven defects no test on the development machine could
 see (blank CJK glyphs, a truncated minutes column, a font lookup bound to the wrong
-DLL, a long boss name elbowing out the coordinate, and a truncated title); all five
-are fixed and recorded in `docs/verified-facts.md`, along with the exact observations
-and what is still open.
+DLL, a long boss name elbowing out the coordinate, a truncated title, a fixed height
+that clipped the notes, and invisible glyphs on a transparent surface because GDI
+never writes the alpha byte); all seven are fixed and recorded in
+`docs/verified-facts.md`, along with the exact observations and what is still open.
 
 ## Install and run
 
@@ -126,7 +136,8 @@ uv run dfboss --anchor top-left --width 430 --font-size 14
 
 While it runs, **`F8` toggles whitelist mode** and remembers it. The toggle needs
 the overlay window, so it is available in `overlay` and `panel` mode, not in the
-console.
+console; `--hotkey` changes the key (F1–F12, Insert, Home, End), and
+`tools/pc/probe-hotkeys.py` reports which are free on a machine.
 
 ## How it reads
 
@@ -158,7 +169,7 @@ docs/windows-runbook.md        step-by-step instructions to run it on the game P
 ## Development
 
 ```sh
-uv run pytest                      # 165 domain, service, ui and app tests
+uv run pytest                      # 180 domain, service, ui and app tests
 uv run dfboss --once               # a live look, no window
 ```
 

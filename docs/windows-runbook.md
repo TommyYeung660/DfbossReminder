@@ -151,6 +151,15 @@ tools/run_on_pc.sh 'call tools\pc\verify-overlay.cmd overlay below-minimap 24 "2
 「客戶區上 + 10 + 215 + 4」。那三個數字是量出來的 minimap 矩形（客戶區座標），
 不是猜的。`overlay-run.log` 會一起印出來。
 
+### 2b-2. 查哪個切換鍵可用
+
+```powershell
+tools/run_on_pc.sh 'py -3 tools\pc\probe-hotkeys.py'
+```
+
+白名單切換鍵是全域熱鍵,被別的程式佔用就註冊不到(而且會明確回報)。這台機器上 F8
+是空的、只有 F12 被佔用。要換鍵用 `--hotkey F6`,或在設定界面改。
+
 ### 2c. 驗證設定界面開得起來
 
 ```powershell
@@ -196,3 +205,8 @@ PASS: clicks pass through to the window underneath, and focus was not taken
   MingLiU → MS Gothic → SimSun → Microsoft JhengHei → Consolas）。
   2026-09-22 那台機器挑到 **MS Gothic**。要指定就用 `--font "字型名"`;
   若只想用 ASCII 方位（`E3N2`）可用 `--direction-style en`。
+* 預設是**完全透明底**（`--opacity 0`）：只畫字，字後面有一層暗色陰影讓它在亮地面上仍
+  可讀。想要深色底就把 opacity 調高（例如 `--opacity 0.86`），那時會一併畫框線。
+* 視窗高度是**上限**，會跟著內容自動增減，所以底部的中文備註不會被切掉；
+  真的超過上限時，最後一行會寫「（還有 N 行未顯示）」。
+* 標籤（標題、備註、狀態）預設中文，`--language en` 可切英文；boss 那幾行是固定格式。

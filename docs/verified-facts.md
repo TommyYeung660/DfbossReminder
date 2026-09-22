@@ -87,6 +87,17 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | The overlay is refused when the game is not running, and the refusal is not swallowed by the console fallback | Implementation fact | `tests/test_app.py`, `app.GameNotRunning` |
 | The tier is a **name list**, because the boss map carries no tier; the default is the wiki's Special Daily Bosses | Wiki-sourced | *Bosses*, threat levels 1–8 plus "Special Daily Bosses … extra tough … once per day … stay for 3 hours instead of the normal bosses' 1 hour" |
 
+### Verified on the game PC, 2026-09-22 (third session: transparent 10 px)
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| The readout renders at 10 px in bright green with **no backing box**: the game's terrain shows through between and inside the glyphs | Recorded live | `docs/evidence/2026-09-22-overlay-transparent-on-client.png` |
+| **GDI never writes the alpha byte**, so on a surface cleared to `alpha 0` the glyphs were drawn and then invisible — `UpdateLayeredWindow` composites by alpha. The fix gives every pixel we drew a full alpha, found by "cleared to zero, so any non-zero colour is ours" | Recorded live (found by it crashing the dump: `ValueError: bytes must be in range(0, 256)`) | `ui/panel.py` `_opaque_glyphs` |
+| The window **sizes itself to its content**, so the notes at the bottom are no longer clipped; the height is a maximum, and anything over it is reported on the last line | Recorded live | `…-overlay-transparent-run.txt`; the earlier fixed height silently dropped the notes |
+| The header, notes and status are Chinese by default and English with `--language en`; the boss lines are the fixed format in both | Recorded live + Implementation fact | the capture, and `tests/test_view.py` |
+| **F8 is free on the game PC** (only F12 is held by something else), so the earlier "could NOT register F8" was two of this project's own overlays competing, not a conflict with another application | Recorded live | `tools/pc/probe-hotkeys.py`; the failure disappeared once the previous instance had exited |
+| The toggle key is a setting, so a machine where it *is* taken can pick another | Implementation fact | `settings.hotkey`, `--hotkey` |
+
 ### Defects the live run found, and the fixes
 
 Running it on Windows was worth it for these alone: none was visible from the
@@ -99,6 +110,8 @@ development machine or from any test.
 | The overlay died with `AttributeError: function 'GetTextFaceW' not found` | It was bound on `user32`; it lives in `gdi32` | Bound on `gdi32`, and any probe failure now means "face unavailable" so a missing glyph can never stop the readout appearing |
 | A long joined name (`1 x Evolved Longarms + 1 x Irradiated …`) **elbowed the coordinate and the bearing off the line**, leaving `… \| …` | A fixed name budget, so the line overflowed the panel and the window's ellipsis ate the last fields | The budget is computed from the configured width and font size minus everything that follows the name; a test asserts every row fits the shipped width |
 | The title was cut mid-word (`… 1057,1017  …`) | The title was one fixed string, wider than the narrow strip | The longest form that fits is used, dropping the account name first; a test checks the budget at every shipped width |
+| The **notes at the bottom of the list were clipped** by a fixed window height — the worst thing to lose, because the notes are what says whether an empty readout is correct or a bug | A height chosen before the content was known | The window sizes itself to its content up to a configured maximum, and anything over that is reported on the last line rather than vanishing |
+| With a transparent backing the **glyphs became invisible** | GDI does not write the alpha byte, so `alpha 0` pixels stayed `alpha 0` and `UpdateLayeredWindow` composited them away | The pixels this process drew are given a full alpha; the test is exact because the surface was cleared to zero first |
 
 ## Open questions
 

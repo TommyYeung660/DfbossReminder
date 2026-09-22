@@ -30,6 +30,7 @@ from .domain.settings import (
     ANCHORS,
     DEFAULT_BASE_URL,
     DIRECTION_STYLES,
+    LANGUAGES,
     PRESENTATIONS,
     Settings,
     normalize_user_id,
@@ -136,6 +137,18 @@ def apply_overrides(settings: Settings, args: argparse.Namespace) -> tuple[Setti
         changed = True
     if args.font_size is not None:
         updates["font_size"] = args.font_size
+        changed = True
+    if args.opacity is not None:
+        updates["opacity"] = args.opacity
+        changed = True
+    if args.language:
+        updates["language"] = args.language
+        changed = True
+    if args.hotkey:
+        updates["hotkey"] = args.hotkey
+        changed = True
+    if args.text_shadow is not None:
+        updates["text_shadow"] = args.text_shadow == "on"
         changed = True
     if args.include_missions:
         updates["include_missions"] = True
@@ -254,23 +267,28 @@ class OverlayPresenter:
         return screen_rect() or Rect(0, 0, self.settings.width, self.settings.height), \
             "anchored to the screen"
 
-    def _corner(self, area: Rect) -> tuple[int, int]:
-        """Where the window goes, honouring the ``below-minimap`` anchor."""
+    def _corner(self, area: Rect, height: int) -> tuple[int, int]:
+        """Where the window goes, honouring the ``below-minimap`` anchor.
+
+        ``height`` is passed in because the window sizes itself to its content: an
+        anchor on a bottom edge is measured *up* from that edge, so it has to know how
+        tall the thing it is placing turned out to be.
+        """
         if self.settings.anchor == "below-minimap":
             # Measured from the client area, so it needs the client even when the
             # presentation is ``panel``; that is why the game window is required above.
             return layout.place_below_minimap(
                 area.left, area.top, self.settings.minimap_left, self.settings.minimap_top,
-                self.settings.minimap_size, self.settings.width, self.settings.height,
+                self.settings.minimap_size, self.settings.width, height,
                 self.settings.minimap_gap)
         return layout.place(self.settings.anchor, area.left, area.top, area.width,
-                            area.height, self.settings.width, self.settings.height,
+                            area.height, self.settings.width, height,
                             self.settings.offset_x, self.settings.offset_y)
 
     def _place(self, area_and_note: tuple[Rect, str]) -> None:
         area, note = area_and_note
         self.notes = [note]
-        left, top = self._corner(area)
+        left, top = self._corner(area, self.settings.height)
         self.overlay = Overlay(left, top, self.settings.width, self.settings.height,
                                background=(*self.settings.colour("background"),
                                            int(255 * self.settings.opacity)),
@@ -278,7 +296,8 @@ class OverlayPresenter:
                                title_colour=self.settings.colour("title"),
                                font_size=self.settings.font_size,
                                font_face=self.settings.font_face,
-                               prefer_ascii=self.settings.direction_style == "en")
+                               prefer_ascii=self.settings.direction_style == "en",
+                               text_shadow=self.settings.text_shadow)
         if self.hotkey_name:
             # Reported either way, because "the toggle works" is a claim that needs a
             # record: a silent failure here looks exactly like a hotkey nobody pressed.
@@ -292,7 +311,29 @@ class OverlayPresenter:
         if self.overlay is None:
             return
         rows: tuple[Row, ...] = view.rows_for(plan, settings, status, stale)
+        rows = self._fit(rows, settings)
         self.overlay.set_content(view.title_line(plan, settings, account), rows)
+
+    def _fit(self, rows: tuple[Row, ...], settings: Settings) -> tuple[Row, ...]:
+        """Size the window to its content, and say so if the maximum clips it.
+
+        A fixed height used to drop the tail of the list, and the tail is the notes -
+        the part that says whether an empty readout is correct or a bug. The window now
+        follows its content up to ``height``, and anything still over that limit is
+        reported on its last line rather than silently vanishing.
+        """
+        area, _note = self._area()
+        height = min(settings.height, self.overlay.height_for(len(rows)))
+        left, top = self._corner(area, height)
+        self.overlay.resize(left, top, settings.width, height)
+        fitting = self.overlay.rows_fitting
+        if len(rows) <= fitting:
+            return rows
+        # The warning row takes one of the slots it is counting, so the number is right.
+        hidden = len(rows) - fitting + 1
+        return rows[: fitting - 1] + (
+            Row(view.status_text("hidden_rows", settings.language, count=hidden),
+                settings.colour("note")),)
 
     def follow(self, window: GameWindow | None) -> str:
         """Re-anchor when the client moves; returns a note when the anchor changed."""
@@ -301,7 +342,7 @@ class OverlayPresenter:
         if not self.use_client_area and self.settings.anchor != "below-minimap":
             return ""
         area = window.client
-        left, top = self._corner(area)
+        left, top = self._corner(area, self.overlay.height)
         if (left, top) != (self.overlay.left, self.overlay.top):
             self.overlay.move_to(left, top)
             return f"moved with the client to ({left}, {top})"
@@ -335,7 +376,8 @@ def make_presenter(settings: Settings, log=print):  # noqa: ANN001, ANN201
             log(f"{settings.presentation} needs Windows; falling back to the console")
         return ConsolePresenter()
     try:
-        return OverlayPresenter(settings, use_client_area=settings.presentation == "overlay", log=log)
+        return OverlayPresenter(settings, use_client_area=settings.presentation == "overlay",
+                                hotkey=settings.hotkey or DEFAULT_TOGGLE_HOTKEY, log=log)
     except GameNotRunning:
         # Requirement: no game, no overlay. Falling back to the console here would
         # silently ignore the setting the player chose, so it is reported instead.
@@ -400,14 +442,22 @@ class Watch:
         return build_plan(self.events, self.player, self.settings, time.time())
 
     def status(self, now: float) -> tuple[str, bool]:
-        """``(status text, stale)`` - what the header and the note colour say."""
+        """``(status text, stale)`` - what the last line and the note colour say.
+
+        The wording comes from the presentation, in the configured language, so the
+        readout is Chinese without the plan knowing a language.
+        """
+        from .ui.view import status_text  # noqa: PLC0415 - presentation lives below
+
+        language = self.settings.language
         if not self.last_success:
-            return (f"no data yet: {self.last_error}" if self.last_error else "fetching ..."), True
+            if self.last_error:
+                return status_text("no_data", language, reason=self.last_error), True
+            return status_text("fetching", language), True
         age = now - self.last_success
-        stale = age > self.settings.stale_seconds
-        if stale:
-            return f"stale {age:.0f}s (last: {self.last_error or 'ok'})", True
-        return f"updated {age:.0f}s ago", False
+        if age > self.settings.stale_seconds:
+            return status_text("stale", language, age=age, reason=self.last_error or "ok"), True
+        return status_text("fresh", language, age=age), False
 
     def tick(self, now: float) -> None:
         if now >= self.next_fetch:
@@ -487,7 +537,10 @@ def export_plan(plan: Plan, settings: Settings, account: str, path: Path, fetche
             "suppressed_by_whitelist": plan.suppressed_by_whitelist,
             "beyond_radius": plan.beyond_radius,
         },
-        "notes": list(plan.notes),
+        # Both forms: the code so a machine can act on it, the text so a person can
+        # read what the run thought it was doing.
+        "notes": [{"code": note.code, "values": note.values(),
+                   "text": view.note_text(note, settings.language)} for note in plan.notes],
         "rows": [
             {"name": row.name, "amount": row.amount, "x": row.block.x, "y": row.block.y,
              "distance": row.distance, "bearing": row.direction(settings.direction_style),
@@ -506,7 +559,8 @@ def run_once(settings: Settings, client: ProfilerClient, json_path: str = "", lo
         log(f"fetch failed: {error}")
         return 1
     plan = build_plan(events, player, settings, time.time())
-    for line in view.console_lines(plan, settings, "updated 0s ago", False):
+    status = view.status_text("fresh", settings.language, age=0)
+    for line in view.console_lines(plan, settings, status, False):
         log(line)
     if json_path:
         export_plan(plan, settings, account, Path(json_path),
@@ -543,7 +597,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int, metavar="PX", help="readout width in pixels")
     parser.add_argument("--height", type=int, metavar="PX", help="readout height in pixels")
     parser.add_argument("--font-size", type=int, metavar="PX",
-                        help="readout font size in pixels (default 12)")
+                        help="readout font size in pixels (default 10)")
+    parser.add_argument("--opacity", type=float, metavar="0-1",
+                        help="readout backing opacity; 0 is fully transparent")
+    parser.add_argument("--text-shadow", choices=("on", "off"),
+                        help="dark shadow behind the glyphs, for a transparent backing")
+    parser.add_argument("--language", choices=LANGUAGES,
+                        help="language of the header, notes and status (default zh)")
+    parser.add_argument("--hotkey", metavar="KEY",
+                        help="in-game whitelist toggle key (default F8; F1-F12, Insert, Home, End)")
     parser.add_argument("--font", metavar="FACE",
                         help="overlay font; default picks a fixed-pitch face with CJK glyphs")
     parser.add_argument("--big-boss", action="append", metavar="NAME", default=[],

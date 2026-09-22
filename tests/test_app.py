@@ -13,6 +13,8 @@ import pytest
 
 from dfbossreminder import app
 from dfbossreminder.domain.settings import Settings, parse_settings
+from dfbossreminder.services.window import Rect
+from dfbossreminder.ui.panel import Row
 
 PROFILE = {"gpscoords": ["1057", "1017"], "override": {"account_name": "tommy660"}}
 BOSS = {
@@ -154,6 +156,10 @@ def test_run_once_prints_the_plan_and_writes_json(tmp_path: Path) -> None:
     assert payload["counts"]["shown"] == 1          # only the bandit is within 5 blocks
     assert payload["rows"][0]["distance"] == 1
     assert payload["rows"][0]["bearing"] == "1下"
+    # The export carries both the note's code and its text, so a machine and a person
+    # can each read what the run thought it was doing.
+    assert payload["notes"][0]["code"] == "within"
+    assert payload["notes"][0]["text"] == "5 格內"
 
 
 def test_run_once_reports_a_fetch_failure_rather_than_raising() -> None:
@@ -189,7 +195,7 @@ def test_the_first_tick_fetches_and_draws_the_nearby_boss() -> None:
     plan = presenter.draws[0]["plan"]
     assert [row.name for row in plan.rows] == ["Bandits"]
     assert presenter.draws[0]["stale"] is False
-    assert "updated" in presenter.draws[0]["status"]
+    assert "已更新" in presenter.draws[0]["status"]
 
 
 def test_a_fetch_failure_keeps_the_last_plan_and_marks_it_stale() -> None:
@@ -200,7 +206,7 @@ def test_a_fetch_failure_keeps_the_last_plan_and_marks_it_stale() -> None:
     watch_obj.tick(1000.0 + watch_obj.settings.stale_seconds + 1)
     # The old plan is still drawn, and it says it is old rather than pretending.
     assert presenter.draws[-1]["stale"] is True
-    assert "stale" in presenter.draws[-1]["status"]
+    assert "過期" in presenter.draws[-1]["status"]
     assert presenter.draws[-1]["plan"].rows
 
 
@@ -208,7 +214,7 @@ def test_a_failure_before_any_success_says_so_and_draws_nothing() -> None:
     watch_obj, presenter = watch(client=FakeClient(fail="bossmap"))
     watch_obj.tick(1000.0)
     assert presenter.draws[-1]["stale"] is True
-    assert "no data yet" in presenter.draws[-1]["status"]
+    assert "尚未取得資料" in presenter.draws[-1]["status"]
     assert presenter.draws[-1]["plan"].rows == ()
 
 
@@ -241,7 +247,7 @@ def test_a_position_that_is_unknown_is_never_pretended() -> None:
     plan = presenter.draws[-1]["plan"]
     assert plan.player is None
     assert plan.rows[0].distance is None
-    assert "no player position" in plan.notes
+    assert [note.code for note in plan.notes] == ["no_player"]
 
 
 def test_the_loop_closes_the_presenter_when_it_stops() -> None:
@@ -362,3 +368,79 @@ def test_a_half_typed_whitelist_row_is_dropped_rather_than_saved_as_a_coordinate
                                                {"x": "", "y": "1000", "radius": "0"}]})
     assert len(payload["whitelist"]) == 1
     assert payload["whitelist"][0]["radius"] == 1
+
+
+# ------------------------------------------------- the readout sizes itself
+
+
+class StubOverlay:
+    """Just enough overlay for the sizing rule, which is where a clip would hide."""
+
+    def __init__(self, rows_fitting: int, line_height: int = 15, title_height: int = 18) -> None:
+        self.rows_fitting = rows_fitting
+        self.line_height = line_height
+        self.title_height = title_height
+        self.height = title_height + rows_fitting * line_height + 5
+        self.top = 100
+        self.left = 200
+
+    def height_for(self, rows: int) -> int:
+        return self.title_height + rows * self.line_height + 5
+
+    def resize(self, left: int, top: int, width: int, height: int) -> None:
+        self.left, self.top, self.height = left, top, height
+
+    def set_content(self, title: str, rows: tuple) -> None:  # noqa: ANN001
+        self.title, self.rows = title, rows
+
+
+def presenter_with(fitting: int) -> app.OverlayPresenter:
+    """A presenter whose overlay is a stub, so no Windows call is made."""
+    presenter = app.OverlayPresenter.__new__(app.OverlayPresenter)
+    presenter.settings = parse_settings({})
+    presenter.use_client_area = True
+    # A client rectangle to measure against, so the sizing rule is exercised without a
+    # game: the presenter's own arithmetic is what is under test.
+    presenter.window = type("W", (), {"client": Rect(0, 0, 1280, 720),
+                                      "exclusive_fullscreen": False})()
+    presenter.notes = []
+    presenter.hotkey_registered = False
+    presenter.overlay = StubOverlay(fitting)
+    return presenter
+
+
+def test_the_window_grows_to_fit_its_rows() -> None:
+    # A fixed height dropped the tail of the list, and the tail is the notes.
+    presenter = presenter_with(20)
+    rows = tuple(Row(f"row {index}") for index in range(12))
+    kept = presenter._fit(rows, parse_settings({}))
+    assert kept == rows
+    assert presenter.overlay.height >= presenter.overlay.height_for(12) - 1
+
+
+def test_rows_over_the_maximum_height_are_reported_not_dropped_silently() -> None:
+    presenter = presenter_with(6)
+    rows = tuple(Row(f"row {index}") for index in range(20))
+    kept = presenter._fit(rows, parse_settings({"height": presenter.overlay.height}))
+    assert len(kept) == 6
+    assert kept[-1].text == "（還有 15 行未顯示）"       # 20 - 6 + 1
+    assert kept[-1].colour == parse_settings({}).colour("note")
+
+
+def test_the_last_row_is_never_the_one_that_disappears() -> None:
+    # The notes are the last rows, and they are what says whether an empty readout is
+    # correct; a trim that lost them would hide the explanation.
+    presenter = presenter_with(4)
+    rows = (Row("boss"), Row("boss"), Row("waypoint"), Row("10 格內"), Row("已更新 0 秒前"))
+    kept = presenter._fit(rows, parse_settings({"height": presenter.overlay.height}))
+    assert "未顯示" in kept[-1].text
+
+
+def test_the_hotkey_is_configurable_because_f8_is_not_always_free() -> None:
+    # On the game PC something else already holds F8, and a toggle that cannot register
+    # is a toggle that does not exist.
+    assert parse_settings({}).hotkey == "F8"
+    assert parse_settings({"hotkey": "f6"}).hotkey == "F6"
+    args = app.build_parser().parse_args(["--hotkey", "F6"])
+    settings, save = app.apply_overrides(Settings(), args)
+    assert settings.hotkey == "F6" and save

@@ -139,11 +139,14 @@ def test_a_three_digit_colour_is_expanded() -> None:
     assert parse_settings({"colours": {"list": "0F0"}}).colour("list") == (0, 255, 0)
 
 
-def test_the_default_theme_is_a_bright_green_list_on_a_dark_backing() -> None:
+def test_the_default_theme_is_bright_green_text_with_no_backing() -> None:
     settings = Settings()
     assert settings.colour("list") == (0x33, 0xFF, 0x33)
-    assert settings.font_size == 12
-    assert settings.colour("background")[0] < 40      # dark, so green stays legible
+    assert settings.font_size == 10
+    assert settings.opacity == 0.0                    # fully transparent backing
+    assert settings.text_shadow                        # so the glyphs stay readable
+    assert settings.language == "zh"
+    assert settings.colour("background")[0] < 40       # still dark, if a backing is asked for
 
 
 def test_the_default_minimap_rectangle_is_the_measured_one() -> None:
@@ -160,3 +163,19 @@ def test_an_empty_big_boss_list_is_honoured_not_replaced() -> None:
     # Clearing the list is a player saying "I count nothing as big", not a missing value.
     assert parse_settings({"big_bosses": []}).big_bosses == ()
     assert parse_settings({"big_bosses": "Devil Hound"}).big_bosses == Settings().big_bosses
+
+
+def test_opacity_zero_is_allowed_because_that_is_the_transparent_mode() -> None:
+    assert parse_settings({"opacity": 0}).opacity == 0.0
+    assert parse_settings({"opacity": -1}).opacity == 0.0
+    assert parse_settings({"opacity": 2}).opacity == 1.0
+
+
+def test_the_shadow_and_the_language_round_trip() -> None:
+    settings = parse_settings({"text_shadow": False, "language": "en"})
+    assert settings.text_shadow is False and settings.language == "en"
+    assert parse_settings(to_dict(settings)) == settings
+
+
+def test_an_unknown_language_falls_back_to_chinese() -> None:
+    assert parse_settings({"language": "klingon"}).language == "zh"

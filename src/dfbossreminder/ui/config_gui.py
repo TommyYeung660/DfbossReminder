@@ -29,6 +29,7 @@ from ..domain.settings import (
     COLOUR_KEYS,
     DEFAULT_COLOURS,
     DIRECTION_STYLES,
+    LANGUAGES,
     PRESENTATIONS,
     Settings,
     parse_settings,
@@ -60,6 +61,8 @@ def form_from_settings(settings: Settings) -> dict:
         "font_size": settings.font_size,
         "font_face": settings.font_face,
         "opacity": settings.opacity,
+        "text_shadow": settings.text_shadow,
+        "language": settings.language,
         "colours": settings.colour_map,
         "width": settings.width,
         "height": settings.height,
@@ -138,7 +141,9 @@ def payload_from_form(form: dict) -> dict:
         "whitelist": whitelist,
         "font_size": _int(form.get("font_size"), 12),
         "font_face": str(form.get("font_face", "")).strip(),
-        "opacity": _float(form.get("opacity"), 0.86),
+        "opacity": _float(form.get("opacity"), 0.0),
+        "text_shadow": bool(form.get("text_shadow")),
+        "language": form.get("language"),
         "colours": dict(form.get("colours") or {}),
         "width": _int(form.get("width"), 300),
         "height": _int(form.get("height"), 220),
@@ -293,7 +298,10 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
     entry(appearance, "Font size (px)", "font_size", value=settings.font_size)
     entry(appearance, "Font face (blank = pick one)", "font_face", width=24,
           value=settings.font_face)
-    entry(appearance, "Background opacity (0-1)", "opacity", value=settings.opacity)
+    entry(appearance, "Background opacity (0 = see-through)", "opacity", value=settings.opacity)
+    check(appearance, "Dark shadow behind the text (for a transparent backing)",
+          "text_shadow", settings.text_shadow)
+    choice(appearance, "Language of the labels", "language", LANGUAGES, settings.language)
     entry(appearance, "Width (px)", "width", value=settings.width)
     entry(appearance, "Height (px)", "height", value=settings.height)
     entry(appearance, "Max rows", "max_rows", value=settings.max_rows)

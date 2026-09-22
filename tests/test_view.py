@@ -122,7 +122,7 @@ def test_the_title_is_trimmed_to_the_configured_width() -> None:
                     radius_blocks=10)
     narrow = parse_settings({"radius_blocks": 10})                    # the shipped width
     title = view.title_line(plan, narrow, "tommy660")
-    assert "1000,1000" in title and "1 nearby" in title
+    assert "1000,1000" in title and "1 個附近" in title
     assert view.display_width(title) <= view.columns_for(narrow)
 
     wide = parse_settings({"radius_blocks": 10, "width": 900})
@@ -148,10 +148,51 @@ def test_the_waypoint_uses_the_same_shape_as_a_boss() -> None:
 def test_the_notes_follow_the_rows_in_the_note_colour() -> None:
     plan = plan_for([], Block(1000, 1000), radius_blocks=10)
     settings = parse_settings({"radius_blocks": 10})
-    rows = view.rows_for(plan, settings, "updated 1s ago", False)
-    assert rows[-1].text == "within 10 blocks"
+    rows = view.rows_for(plan, settings, "已更新 1 秒前", False)
+    assert "within 10 blocks" not in [row.text for row in rows]
+    assert "10 格內" in [row.text for row in rows]
+    assert rows[-1].text == "已更新 1 秒前"          # the status is last
     assert rows[-1].colour == settings.colour("note")
-    assert any(row.text == "updated 1s ago" for row in rows)
+
+
+def test_the_labels_are_chinese_by_default_and_english_when_asked() -> None:
+    plan = plan_for([{"name": "6 x Bandits", "blocks": [(1001, 1000)]}], Block(1000, 1000),
+                    radius_blocks=10)
+    zh = parse_settings({"radius_blocks": 10})
+    en = parse_settings({"radius_blocks": 10, "language": "en"})
+    assert "10 格內" in [row.text for row in view.rows_for(plan, zh)]
+    assert "within 10 blocks" in [row.text for row in view.rows_for(plan, en)]
+    assert "1 個附近" in view.title_line(plan, zh)
+    assert "1 nearby" in view.title_line(plan, en)
+    # The boss lines are a fixed format in both.
+    for settings in (zh, en):
+        assert any(row.text == "6 x Bandits | 1001 x 1000 | 1R"
+                   for row in view.rows_for(plan, settings))
+
+
+def test_the_status_line_is_localised() -> None:
+    assert view.status_text("fresh", "zh", age=3) == "已更新 3 秒前"
+    assert view.status_text("fresh", "en", age=3) == "updated 3s ago"
+    assert view.status_text("no_data", "zh", reason="boom") == "尚未取得資料：boom"
+    assert view.status_text("stale", "zh", age=300, reason="ok") == "資料已過期 300 秒（ok）"
+
+
+def test_every_status_code_has_both_languages() -> None:
+    # A code with no wording prints itself at the player, which is how "hidden_rows"
+    # would have reached the screen.
+    for code, (zh, en) in view.STATUS_TEXT.items():
+        assert zh and en and zh != code and en != code
+    assert "hidden_rows" in view.STATUS_TEXT
+    assert view.status_text("hidden_rows", "zh", count=3) == "（還有 3 行未顯示）"
+
+
+def test_every_note_code_has_both_languages() -> None:
+    # A note with no wording would print its own code at the player.
+    for code, (zh, en) in view.NOTE_TEXT.items():
+        assert zh and en and zh != code and en != code
+    for code in ("within", "beyond", "no_player", "whitelist", "whitelist_empty",
+                 "missions", "capped"):
+        assert code in view.NOTE_TEXT
 
 
 def test_a_long_boss_name_is_elided_rather_than_overflowing() -> None:

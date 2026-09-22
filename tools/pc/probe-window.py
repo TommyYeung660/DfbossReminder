@@ -74,6 +74,8 @@ def describe(user32, hwnd: int) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", type=int, default=12, help="how many visible windows to report")
+    parser.add_argument("--rect-file", default="",
+                        help="write the game client's rect as 'L T W H' for a caller to use")
     args = parser.parse_args()
 
     if sys.platform != "win32":
@@ -88,6 +90,18 @@ def main() -> int:
 
     # The question the in-game mode depends on.
     game = find_game_window()
+    if args.rect_file:
+        # The client moves between runs, and a capture cropped at a remembered rect
+        # frames the wrong part of the screen. A caller that needs the rect reads it
+        # from here instead of being told it.
+        if game is not None:
+            rect = game.client
+            Path(args.rect_file).write_text(
+                f"{rect.left} {rect.top} {rect.width} {rect.height}", encoding="ascii")
+            print(f"client rect written to {args.rect_file}")
+        else:
+            Path(args.rect_file).write_text("", encoding="ascii")
+            print("no game window, so no rect was written")
     if game is None:
         print("game window: NOT FOUND (is DeadFrontier.exe running?)")
         print("  -> --presentation overlay will fall back to the screen and say so")

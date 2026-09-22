@@ -39,6 +39,7 @@ PRESENTATIONS = ("overlay", "panel", "console")
 # looking and where it covers the least.
 ANCHORS = ("below-minimap", "top-left", "top-right", "bottom-left", "bottom-right", "center")
 DIRECTION_STYLES = ("zh", "en", "compact")
+LANGUAGES = ("zh", "en")
 
 DEFAULT_BASE_URL = "https://www.dfprofiler.com"
 DEFAULT_WAYPOINT = ("Secronom Bunker", Block(1054, 987))
@@ -61,7 +62,7 @@ DEFAULT_COLOURS = {
     "border": "#2E4A2E",
 }
 COLOUR_KEYS = tuple(DEFAULT_COLOURS)
-DEFAULT_OPACITY = 0.86
+DEFAULT_OPACITY = 0.86    # kept for the settings window's slider default
 
 
 @dataclass(frozen=True)
@@ -95,8 +96,15 @@ class Settings:
     offset_x: int = 14
     offset_y: int = 14
     width: int = 340
-    height: int = 240
+    # A **maximum**: the window grows and shrinks to fit what it has to show, so the
+    # notes at the bottom are never clipped by a height chosen before the content was
+    # known.
+    height: int = 420
     max_rows: int = 12
+    # The in-game whitelist toggle. Configurable because F8 is not free on every
+    # machine - on the game PC something else already holds it - and a toggle that
+    # cannot register is a toggle that does not exist.
+    hotkey: str = "F8"
 
     # The minimap's rectangle in client coordinates, and how far below it the
     # readout starts. These are what ``anchor = below-minimap`` is measured from.
@@ -105,9 +113,15 @@ class Settings:
     minimap_size: int = DEFAULT_MINIMAP[2]
     minimap_gap: int = 4
 
-    font_size: int = 12
+    font_size: int = 10
     colours: tuple[tuple[str, str], ...] = tuple(DEFAULT_COLOURS.items())
-    opacity: float = DEFAULT_OPACITY
+    # Zero means a fully transparent backing: only the glyphs are drawn, so the game
+    # underneath is untouched. A text shadow keeps them readable over bright ground.
+    opacity: float = 0.0
+    text_shadow: bool = True
+    # The language of everything that is not a boss line: the header, the notes, the
+    # status. The boss lines themselves are a fixed format.
+    language: str = "zh"
 
     # The bosses drawn with the "name | block | end time" form instead of a bearing.
     big_bosses: tuple[str, ...] = DEFAULT_BIG_BOSSES
@@ -316,7 +330,9 @@ def parse_settings(payload: object) -> Settings:
         font_face=_text_field(payload.get("font_face"), defaults.font_face),
         font_size=_clamp_int(payload.get("font_size"), defaults.font_size, 8, 32),
         colours=_colours(payload.get("colours"), defaults.colours),
-        opacity=_clamp_float(payload.get("opacity"), defaults.opacity, 0.1, 1.0),
+        opacity=_clamp_float(payload.get("opacity"), defaults.opacity, 0.0, 1.0),
+        text_shadow=_as_bool(payload.get("text_shadow"), defaults.text_shadow),
+        language=_one_of(payload.get("language"), LANGUAGES, defaults.language),
         minimap_left=_clamp_int(payload.get("minimap_left"), defaults.minimap_left, -2000, 4000),
         minimap_top=_clamp_int(payload.get("minimap_top"), defaults.minimap_top, -2000, 4000),
         minimap_size=_clamp_int(payload.get("minimap_size"), defaults.minimap_size, 40, 800),
@@ -325,6 +341,7 @@ def parse_settings(payload: object) -> Settings:
         waypoints=_waypoints(payload.get("waypoints"), defaults.waypoints),
         watch_pid_seconds=_clamp_float(payload.get("watch_pid_seconds"), defaults.watch_pid_seconds,
                                       0.5, 120.0),
+        hotkey=_text_field(payload.get("hotkey"), defaults.hotkey, limit=16).upper(),
     )
 
 
@@ -352,6 +369,8 @@ def to_dict(settings: Settings) -> dict:
         "font_size": settings.font_size,
         "colours": settings.colour_map,
         "opacity": settings.opacity,
+        "text_shadow": settings.text_shadow,
+        "language": settings.language,
         "minimap_left": settings.minimap_left,
         "minimap_top": settings.minimap_top,
         "minimap_size": settings.minimap_size,
@@ -360,4 +379,5 @@ def to_dict(settings: Settings) -> dict:
         "waypoints": [{"label": label, "x": block.x, "y": block.y}
                       for label, block in settings.waypoints],
         "watch_pid_seconds": settings.watch_pid_seconds,
+        "hotkey": settings.hotkey,
     }

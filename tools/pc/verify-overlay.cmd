@@ -21,6 +21,7 @@ set "RECT=%~4"
 if "%PRESENTATION%"=="" set "PRESENTATION=panel"
 if "%ANCHOR%"=="" set "ANCHOR=top-left"
 if "%DURATION%"=="" set "DURATION=20"
+set "RECTFILE=%ROOT%\tools\pc\evidence\client-rect.txt"
 
 cd /d "%ROOT%" || (echo cannot enter %ROOT% & exit /b 1)
 if not exist "tools\pc\evidence" mkdir "tools\pc\evidence"
@@ -35,7 +36,7 @@ echo.
 rem Where does the game window actually sit? Reported here so the overlay's own
 rem placement can be checked against it, and so the crop below is of the client area.
 echo === game window ===
-py -3 tools\pc\probe-window.py --list 3
+py -3 tools\pc\probe-window.py --list 3 --rect-file "%RECTFILE%"
 echo.
 
 rem The overlay draws its own surface once, then keeps running; started in the
@@ -48,6 +49,12 @@ start /b "" cmd /c "py -3 tools\dfboss_main.py --presentation %PRESENTATION% --a
 
 rem Long enough for the first fetch and the first draw, short enough to still be up.
 timeout /t 9 /nobreak >nul
+
+rem Measure the client rather than trusting a caller-supplied rectangle: the window
+rem moves between runs, and a stale rect frames the wrong part of the screen.
+if exist "%RECTFILE%" set /p MEASURED=<"%RECTFILE%"
+if not "%MEASURED%"=="" set "RECT=%MEASURED%"
+echo cropping the client area at "%RECT%"
 
 echo === screen capture (from the desktop) ===
 if "%RECT%"=="" (

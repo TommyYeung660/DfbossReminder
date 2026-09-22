@@ -9,7 +9,9 @@ game, a network, or Windows.
 The plan also says *why* it looks the way it does in ``notes``, because a bare
 list of rows cannot be told apart from a broken one. "no player position" and
 "radius 8 blocks" and "12 more beyond the radius" are the difference between an
-empty panel being correct and being a bug.
+empty panel being correct and being a bug. A note carries a code and its values, not
+a sentence: the wording belongs to the presentation, which is what lets the readout
+be Chinese without teaching the domain a language.
 """
 
 from __future__ import annotations
@@ -22,7 +24,26 @@ from .geometry import Bearing, Block, euclidean
 from .settings import Settings
 from .whitelist import allows_any
 
-NO_PLAYER = "no player position"
+NO_PLAYER = "no_player"
+
+
+@dataclass(frozen=True)
+class Note:
+    """Why the plan looks the way it does, as a code rather than a sentence.
+
+    A note is shown to the player, and the player reads Chinese; keeping the wording
+    out of here means the domain stays language-neutral and the presentation picks the
+    words. ``args`` is a tuple of pairs so the value stays hashable and comparable.
+    """
+
+    code: str
+    args: tuple[tuple[str, object], ...] = ()
+
+    def __str__(self) -> str:
+        return self.code + ("(" + ", ".join(f"{k}={v}" for k, v in self.args) + ")" if self.args else "")
+
+    def values(self) -> dict:
+        return dict(self.args)
 
 
 @dataclass(frozen=True)
@@ -79,7 +100,7 @@ class Plan:
 
     rows: tuple[BossRow, ...]
     player: Block | None
-    notes: tuple[str, ...]
+    notes: tuple[Note, ...]
     total_sightings: int
     nearby_sightings: int
     shown: int
@@ -126,14 +147,14 @@ def build_plan(
     radius only applies in the normal mode, where the question is "what is near me".
     """
     sightings = expand(events)
-    notes: list[str] = []
+    notes: list[Note] = []
 
     whitelisted_only = settings.whitelist_mode
     if whitelisted_only and not settings.whitelist:
         # Whitelist mode with nothing on the list means nothing can match. Showing
         # everything instead would be the opposite of what the mode is for, so this
         # stays empty and says why.
-        notes.append("whitelist mode is on but the whitelist is empty")
+        notes.append(Note("whitelist_empty"))
 
     suppressed = 0
     beyond = 0
@@ -146,13 +167,14 @@ def build_plan(
 
     if whitelisted_only:
         chosen = considered if settings.whitelist else []
-        notes.append(f"whitelist on ({len(settings.whitelist)} entries, {suppressed} suppressed)")
+        notes.append(Note("whitelist", (("entries", len(settings.whitelist)),
+                                       ("suppressed", suppressed))))
         if player is None:
-            notes.append(NO_PLAYER)
+            notes.append(Note(NO_PLAYER))
     elif player is None:
         # No position means no radius to measure. Listing everything at least names
         # the bosses that are out, and the note keeps that from looking deliberate.
-        notes.append(NO_PLAYER)
+        notes.append(Note(NO_PLAYER))
         chosen = considered if settings.show_all_without_player else []
     else:
         chosen = []
@@ -161,7 +183,7 @@ def build_plan(
                 chosen.append(row)
             else:
                 beyond += 1
-        notes.append(f"within {settings.radius_blocks} blocks")
+        notes.append(Note("within", (("radius", settings.radius_blocks),)))
 
     # Nearest first; the straight-line distance only breaks ties between cells that
     # are the same number of blocks away, so the order never contradicts the count.
@@ -172,13 +194,13 @@ def build_plan(
                                  row.block.y, row.block.x))
 
     if settings.include_missions:
-        notes.append("missions included")
+        notes.append(Note("missions"))
     if beyond:
-        notes.append(f"{beyond} beyond the radius")
+        notes.append(Note("beyond", (("count", beyond),)))
 
     shown = chosen[: settings.max_rows]
     if len(chosen) > len(shown):
-        notes.append(f"{len(chosen) - len(shown)} more not shown")
+        notes.append(Note("capped", (("count", len(chosen) - len(shown)),)))
 
     return Plan(
         rows=tuple(shown),

@@ -23,9 +23,34 @@ from __future__ import annotations
 import unicodedata
 
 from ..domain.geometry import Bearing
-from ..domain.plan import Plan
+from ..domain.plan import Note, Plan
 from ..domain.settings import Settings
 from .panel import Row
+
+# Every sentence the readout says, in both languages. The boss lines are NOT here -
+# they are a fixed format the player specified - so this is only the header, the notes
+# and the status. Each entry is (zh, en).
+NOTE_TEXT: dict[str, tuple[str, str]] = {
+    "within": ("{radius} 格內", "within {radius} blocks"),
+    "beyond": ("半徑外 {count} 個", "{count} beyond the radius"),
+    "no_player": ("沒有玩家位置", "no player position"),
+    "whitelist": ("白名單 {entries} 筆，過濾 {suppressed} 個",
+                  "whitelist on ({entries} entries, {suppressed} suppressed)"),
+    "whitelist_empty": ("白名單模式開啟但清單是空的",
+                        "whitelist mode is on but the whitelist is empty"),
+    "missions": ("包含任務", "missions included"),
+    "capped": ("還有 {count} 個未顯示", "{count} more not shown"),
+}
+
+STATUS_TEXT: dict[str, tuple[str, str]] = {
+    "fresh": ("已更新 {age:.0f} 秒前", "updated {age:.0f}s ago"),
+    "stale": ("資料已過期 {age:.0f} 秒（{reason}）", "stale {age:.0f}s ({reason})"),
+    "no_data": ("尚未取得資料：{reason}", "no data yet: {reason}"),
+    "fetching": ("取得資料中…", "fetching ..."),
+    "hidden_rows": ("（還有 {count} 行未顯示）", "({count} more lines not shown)"),
+}
+
+LANGUAGE_INDEX = {"zh": 0, "en": 1}
 
 # How much of a boss name is kept before it is elided. The panel elides too, but
 # capping here keeps a pathological name from dominating the strip.
@@ -85,6 +110,24 @@ def block_text(block) -> str:  # noqa: ANN001
     return f"{block.x} x {block.y}"
 
 
+def _pick(table: dict[str, tuple[str, str]], code: str, language: str, **values) -> str:
+    """One localised sentence, with the English form as the fallback for a new code."""
+    zh, en = table.get(code, (code, code))
+    template = zh if language != "en" else en
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError, ValueError):
+        return template
+
+
+def note_text(note: Note, language: str = "zh") -> str:
+    return _pick(NOTE_TEXT, note.code, language, **note.values())
+
+
+def status_text(code: str, language: str = "zh", **values) -> str:
+    return _pick(STATUS_TEXT, code, language, **values)
+
+
 def title_line(plan: Plan, settings: Settings, account: str = "") -> str:
     """``DFBossReminder  tommy660  1057,1017  3 nearby``, trimmed to the width.
 
@@ -92,10 +135,14 @@ def title_line(plan: Plan, settings: Settings, account: str = "") -> str:
     the account name is the first thing dropped: the block and the count are what say
     the readout is alive and where it thinks the player is.
     """
-    where = str(plan.player) if plan.player else "at ?"
-    nearby = f"{plan.nearby_sightings} nearby" + ("  [whitelist]" if settings.whitelist_mode else "")
-    for candidate in (f"DFBossReminder  {account}  {where}  {nearby}" if account else "",
-                      f"DFBossReminder  {where}  {nearby}",
+    language = settings.language
+    where = str(plan.player) if plan.player else ("位置不明" if language != "en" else "at ?")
+    count = (f"{plan.nearby_sightings} 個附近" if language != "en"
+             else f"{plan.nearby_sightings} nearby")
+    if settings.whitelist_mode:
+        count += "  [白名單]" if language != "en" else "  [whitelist]"
+    for candidate in (f"DFBossReminder  {account}  {where}  {count}" if account else "",
+                      f"DFBossReminder  {where}  {count}",
                       f"DFBossReminder  {where}",
                       "DFBossReminder"):
         if candidate and display_width(candidate) <= columns_for(settings):
@@ -133,9 +180,10 @@ def rows_for(plan: Plan, settings: Settings, status: str = "", stale: bool = Fal
             continue
         rows.append(Row(waypoint_line(label, block, Bearing.between(plan.player, block), settings),
                         settings.colour("note")))
-    notes = ([status] if status else []) + list(plan.notes)
-    for note in notes:
-        rows.append(Row(note, settings.colour("note")))
+    for note in plan.notes:
+        rows.append(Row(note_text(note, settings.language), settings.colour("note")))
+    if status:
+        rows.append(Row(status, settings.colour("note")))
     return tuple(rows)
 
 

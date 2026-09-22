@@ -177,6 +177,39 @@ tkinter rather than a packaged toolkit: it is in the standard library, so it kee
 the project's zero runtime dependencies and the PyInstaller build small, and a
 settings form does not need more.
 
+### D11 — A transparent surface needs its glyph pixels made opaque
+
+Worth recording, because it is invisible from the code: **GDI's text drawing does not
+write the alpha byte.** On an opaque surface that is harmless, since the backing left
+255 there. On a surface cleared to `alpha 0` — which is what a fully transparent
+backing is — the glyphs are drawn and then composited away by
+`UpdateLayeredWindow`, so the readout is present, correct, and completely invisible.
+The live run found it by crashing the surface dump rather than by showing nothing,
+which is a reminder that a diagnostic that fails loudly beats a feature that fails
+quietly.
+
+The fix tests each pixel for "not zero" and gives it a full alpha. That test is exact
+because the surface is cleared to exactly zero first, and it is why the shadow colour
+is near-black rather than black: a pure black shadow would be drawn and then discarded
+by the same rule.
+
+### D12 — The window follows its content
+
+The height was a fixed setting, and the live run showed it clipping the *notes* at the
+bottom of the list — the one part that says whether an empty readout is correct or a
+bug, so the worst possible thing to lose silently. The window now sizes itself to what
+it has to show, up to the configured height as a maximum, and anything still over that
+limit appears as a final line saying how many lines were hidden.
+
+### D13 — The toggle key is a setting
+
+The whitelist toggle needs a global hotkey, and a hotkey another application already
+holds cannot be registered — the toggle then does not exist for the player. On the
+game PC the first attempts failed, which turned out to be two of this project's own
+overlays competing rather than a conflict with another program; F8 is in fact free
+there and only F12 is taken. The key is configurable anyway, and
+`tools/pc/probe-hotkeys.py` answers "which are free" for any machine.
+
 ### D10 — No game, no overlay
 
 The overlay is a readout *of the running client*: it is anchored to the client's
@@ -275,7 +308,9 @@ Verified live on the game PC, 2026-09-22 (client windowed at 1280x720 at
 * **clicks pass through and focus is not taken**: `WindowFromPoint` at the overlay's
   centre resolved to the window underneath, and the foreground window was unchanged;
 * the client-rectangle measurement is correct on that machine at its scaling
-  (`tools/pc/probe-window.py`).
+  (`tools/pc/probe-window.py`);
+* the transparent 10 px readout renders with the game showing through, the labels are
+  Chinese, and the window sizes itself so the notes are not clipped.
 
 Not verified — and not claimed:
 
