@@ -405,6 +405,7 @@ def presenter_with(fitting: int) -> app.OverlayPresenter:
                                       "exclusive_fullscreen": False})()
     presenter.notes = []
     presenter.hotkey_registered = False
+    presenter.font_cache = None
     presenter.overlay = StubOverlay(fitting)
     return presenter
 
@@ -472,3 +473,11 @@ def test_the_streams_are_pinned_to_utf8() -> None:
         assert stream.options["encoding"] == "utf-8"
         assert stream.options["errors"] == "replace"
         assert stream.options["line_buffering"]
+
+
+def test_the_alignment_and_the_game_font_are_settable_from_the_command_line() -> None:
+    args = app.build_parser().parse_args(["--align", "right", "--no-game-font"])
+    settings, save = app.apply_overrides(Settings(), args)
+    assert settings.align == "right"
+    assert settings.game_font is False
+    assert save

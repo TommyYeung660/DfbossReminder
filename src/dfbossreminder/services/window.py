@@ -22,6 +22,7 @@ import ctypes
 import sys
 from ctypes import wintypes
 from dataclasses import dataclass
+from pathlib import Path
 
 DEFAULT_EXE = "DeadFrontier.exe"
 DEFAULT_TITLE = "Dead Frontier"
@@ -88,6 +89,53 @@ def _bind():  # noqa: ANN202 - ctypes handles
     user32.GetSystemMetrics.argtypes = [ctypes.c_int]
     user32.GetSystemMetrics.restype = ctypes.c_int
     return user32
+
+
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def process_image_path(pid: int) -> Path | None:
+    """The executable a process is running from, or ``None``.
+
+    Read-only and cheap: the query right is enough to ask for the image path, and the
+    process is closed again immediately. This is how the client's install directory is
+    found, so the tool can take the HUD font from the same installation it is already
+    reading rather than from a path written down somewhere.
+    """
+    if sys.platform != "win32" or pid <= 0:
+        return None
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                                    wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        size = wintypes.DWORD(32768)
+        buffer = ctypes.create_unicode_buffer(size.value)
+        if not kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+            return None
+        return Path(buffer.value) if buffer.value else None
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def game_data_dir(window: GameWindow | None = None, exe: str = DEFAULT_EXE) -> Path | None:
+    """The client's ``*_Data`` directory, where its assets (and its font) live."""
+    window = window if window is not None else find_game_window(exe=exe)
+    if window is None:
+        return None
+    image = process_image_path(window.pid)
+    if image is None:
+        return None
+    for candidate in (image.parent / f"{image.stem}_Data", image.parent / "Data"):
+        if candidate.is_dir():
+            return candidate
+    return None
 
 
 def screen_rect(user32=None) -> Rect | None:  # noqa: ANN001

@@ -25,6 +25,7 @@ from __future__ import annotations
 import ctypes
 import struct
 import sys
+import unicodedata
 from ctypes import wintypes
 from dataclasses import dataclass
 
@@ -51,6 +52,8 @@ DEFAULT_CHARSET = 1
 
 DT_LEFT = 0x00000000
 DT_RIGHT = 0x00000002
+DT_CENTER = 0x00000001
+ALIGN_FLAGS = {"left": DT_LEFT, "right": DT_RIGHT, "center": DT_CENTER}
 DT_SINGLELINE = 0x00000020
 DT_NOPREFIX = 0x00000800
 DT_END_ELLIPSIS = 0x00008000
@@ -74,6 +77,7 @@ VK.update({"INSERT": 0x2D, "HOME": 0x24, "END": 0x23})
 FONT_CANDIDATES = ("MingLiU", "MS Gothic", "SimSun", "Microsoft JhengHei", "Consolas")
 FONT_CANDIDATES_ASCII = ("Consolas", "Courier New")
 
+FR_PRIVATE = 0x10          # load a font for this process only, never system-wide
 DEFAULT_BACKGROUND = (14, 13, 11, 214)
 # Near-black rather than pure black, and not a style choice: with a transparent
 # backing the glyphs are made opaque by the rule "anything we drew has a non-zero
@@ -106,6 +110,15 @@ class _BITMAPINFOHEADER(ctypes.Structure):
 
 class _BITMAPINFO(ctypes.Structure):
     _fields_ = [("bmiHeader", _BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 3)]
+
+
+def needs_cjk(text: str) -> bool:
+    """Whether this text contains a character the client's HUD font cannot draw.
+
+    East Asian Wide and Fullwidth are the two categories a CJK face is needed for;
+    everything else - ASCII, the punctuation this project uses - is in both faces.
+    """
+    return any(unicodedata.east_asian_width(char) in ("W", "F") for char in text)
 
 
 @dataclass(frozen=True)
@@ -181,6 +194,10 @@ def _bind():  # noqa: ANN202 - ctypes handles
     # overlay with "function not found".
     gdi32.GetTextFaceW.argtypes = [wintypes.HDC, ctypes.c_int, wintypes.LPWSTR]
     gdi32.GetTextFaceW.restype = ctypes.c_int
+    gdi32.AddFontResourceExW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+    gdi32.AddFontResourceExW.restype = ctypes.c_int
+    gdi32.RemoveFontResourceExW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+    gdi32.RemoveFontResourceExW.restype = wintypes.BOOL
 
     user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
     user32.RegisterHotKey.restype = wintypes.BOOL
@@ -214,6 +231,8 @@ class Overlay:
         font_face: str = "",
         prefer_ascii: bool = False,
         text_shadow: bool = False,
+        align: str = "right",
+        cjk_face: str = "",
     ) -> None:
         self.user32, self.gdi32 = _bind()
         self.width, self.height = int(width), int(height)
@@ -222,6 +241,7 @@ class Overlay:
         self.border = border
         self.title_colour = title_colour
         self.text_shadow = text_shadow
+        self.align = align if align in ALIGN_FLAGS else "right"
         # A fully transparent backing means the readout is text only: a frame or a
         # title rule with nothing behind it is just stray lines over the game, so both
         # are dropped rather than left floating.
@@ -232,6 +252,7 @@ class Overlay:
         self._title = ""
         self.face_missing = False
         self.last_text_y = 0
+        self.loaded_font_path = ""
         self._class_name = f"DFBossReminderOverlay{id(self) & 0xFFFF}"
 
         self._register_class()
@@ -268,7 +289,8 @@ class Overlay:
         if not self.user32.RegisterClassW(ctypes.byref(window_class)):
             raise OSError(f"RegisterClassW failed: {ctypes.get_last_error()}")
 
-    def _create_buffer(self, font_size: int, font_face: str = "", prefer_ascii: bool = False) -> None:
+    def _create_buffer(self, font_size: int, font_face: str = "", prefer_ascii: bool = False,
+                       cjk_face: str = "") -> None:
         self.screen_dc = self.user32.GetDC(None)
         self.mem_dc = self.gdi32.CreateCompatibleDC(self.screen_dc)
         header = _BITMAPINFO()
@@ -289,9 +311,70 @@ class Overlay:
         self.font_size = font_size
         self.prefer_ascii = prefer_ascii
         candidates = FONT_CANDIDATES_ASCII if prefer_ascii else FONT_CANDIDATES
+        # Two faces, because the client's own HUD font has no CJK glyphs: the boss
+        # lines are drawn in the game's face so they look like the game, and a row with
+        # Chinese in it (the header, the notes) is drawn in a face that has them rather
+        # than as a row of empty boxes.
         self.font_face = font_face or self._pick_face(font_size, candidates)
+        # The CJK face is probed as well, even when it is handed in: a face the
+        # machine does not have must not end up as the one that draws the Chinese.
+        requested_cjk = cjk_face or (self.font_face if not prefer_ascii else "")
+        whole_candidates = ((requested_cjk,) if requested_cjk else ()) + FONT_CANDIDATES
+        self.cjk_face = self._pick_face(font_size, whole_candidates)
         self.font = self._create_font(font_size, self.font_face)
+        self.font_cjk = (self._create_font(font_size, self.cjk_face)
+                         if self.cjk_face != self.font_face else self.font)
         self.blend = _BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
+
+    def set_face(self, face: str) -> None:
+        """Use this face for the ASCII rows, releasing the one it replaces.
+
+        The client's font is loaded through the window (confirming a face needs a device
+        context), so it arrives after construction. Replacing the handle without
+        deleting the old one would leak one GDI object per placement.
+        """
+        if not face or face == self.font_face:
+            return
+        previous = self.font
+        self.font_face = face
+        self.font = self._create_font(self.font_size, face)
+        if previous and previous not in (0, self.font_cjk):
+            self.gdi32.DeleteObject(previous)
+        if self.cjk_face == face:
+            self.font_cjk = self.font
+
+    def load_private_font(self, path, family: str) -> str | None:  # noqa: ANN001
+        """Load a font file for this process only, and return the face name GDI gave.
+
+        ``FR_PRIVATE`` means the font exists for this process and nowhere else - the
+        player's font list is untouched and nothing is installed. The face name is read
+        back rather than assumed, because it is the font's own choice: asking for the
+        wrong spelling silently gets a substitute.
+        """
+        try:
+            added = self.gdi32.AddFontResourceExW(str(path), FR_PRIVATE, None)
+        except (AttributeError, OSError):
+            return None
+        if not added:
+            return None
+        face = self._confirm_face(self.font_size, family)
+        if face:
+            self.loaded_font_path = str(path)
+        return face
+
+    def _confirm_face(self, size: int, face: str) -> str | None:
+        """The face name GDI actually selected, or ``None`` when it substituted."""
+        font = self._create_font(size, face)
+        if not font:
+            return None
+        previous = self.gdi32.SelectObject(self.mem_dc, font)
+        buffer = ctypes.create_unicode_buffer(64)
+        written = self.gdi32.GetTextFaceW(self.mem_dc, 64, buffer)
+        self.gdi32.SelectObject(self.mem_dc, previous)
+        self.gdi32.DeleteObject(font)
+        if written and buffer.value.strip():
+            return buffer.value.strip()
+        return None
 
     def _create_font(self, size: int, face: str):  # noqa: ANN202 - HGDIOBJ
         return self.gdi32.CreateFontW(-size, 0, 0, 0, 600, 0, 0, 0, DEFAULT_CHARSET,
@@ -330,12 +413,16 @@ class Overlay:
         return candidates[-1]
 
     def _release_buffer(self) -> None:
-        for handle, delete in ((self.bitmap, self.gdi32.DeleteObject),
-                               (self.font, self.gdi32.DeleteObject)):
-            if handle:
-                delete(handle)
+        # ``font_cjk`` may be the same handle as ``font``; deleting it twice would be a
+        # double free, so only distinct handles are released.
+        handles = {self.font, self.font_cjk} - {0}
+        for handle in handles:
+            self.gdi32.DeleteObject(handle)
+        if self.bitmap:
+            self.gdi32.DeleteObject(self.bitmap)
         self.bitmap = 0
         self.font = 0
+        self.font_cjk = 0
         if self.mem_dc:
             self.gdi32.DeleteDC(self.mem_dc)
             self.mem_dc = 0
@@ -361,6 +448,7 @@ class Overlay:
         face = self.font_face
         size = self.font_size
         prefer_ascii = self.prefer_ascii
+        cjk = self.cjk_face
         self._release_buffer()
         self.left, self.top = int(left), int(top)
         self.width, self.height = int(width), int(height)
@@ -368,7 +456,7 @@ class Overlay:
                                  self.left, self.top, self.width, self.height,
                                  SWP_NOACTIVATE | SWP_SHOWWINDOW)
         self.face_missing = False
-        self._create_buffer(size, face, prefer_ascii)
+        self._create_buffer(size, face, prefer_ascii, cjk)
         self.present()
 
     def move_to(self, left: int, top: int) -> None:
@@ -444,7 +532,7 @@ class Overlay:
 
     def _draw_text(self) -> None:
         self.gdi32.SelectObject(self.mem_dc, self.font)
-        flags = DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS
+        flags = ALIGN_FLAGS[self.align] | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS
         self._text(self._title, 8, 2, self.width - 8, self.title_height, self.title_colour, flags)
         y = self.title_height + 3
         for row in self._rows:
@@ -492,6 +580,10 @@ class Overlay:
                 self.user32.DrawTextW(self.mem_dc, text, -1,
                                       ctypes.byref(wintypes.RECT(left + dx, top + dy,
                                                                  right + dx, bottom + dy)), flags)
+        # The client's HUD face has no CJK glyphs, so a row with Chinese in it is drawn
+        # in the face that does. Without this the header and the notes are a row of
+        # empty boxes next to boss lines that look perfect.
+        self.gdi32.SelectObject(self.mem_dc, self.font_cjk if needs_cjk(text) else self.font)
         self.gdi32.SetTextColor(self.mem_dc, _rgb(colour))
         self.user32.DrawTextW(self.mem_dc, text, -1,
                               ctypes.byref(wintypes.RECT(left, top, right, bottom)), flags)
@@ -551,7 +643,9 @@ class Overlay:
         backing = (f"opaque alpha={self.background[3]}" if self.framed
                    else "transparent backing (text only)")
         shadow = "; text shadow on" if (self.text_shadow and not self.framed) else ""
-        return f"overlay visible={visible} at {where}{font}; {backing}{shadow}"
+        cjk = f", CJK {self.cjk_face}" if self.cjk_face != self.font_face else ""
+        return (f"overlay visible={visible} at {where}{font}{cjk}; align={self.align}; "
+                f"{backing}{shadow}")
 
     def dump(self, path: str, backdrop: tuple[int, int, int] = (96, 96, 96)) -> str:
         """Write the surface the overlay is presenting, as a 24-bit BMP.

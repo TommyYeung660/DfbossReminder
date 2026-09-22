@@ -25,10 +25,30 @@ Secronom Bunker | 1054 x 987 | 3LU30
 已更新 0 秒前
 ```
 
-The list is drawn at 10 px with a **fully transparent background** — only the glyphs
-are painted, with a dark shadow behind them so they stay readable over bright ground.
-The header, the notes and the status are in Chinese by default (`--language en` for
+The list is drawn in **the client's own HUD font** and **right-aligned** against the
+minimap, at 10 px with a **fully transparent background** — only the glyphs are
+painted, with a dark shadow behind them so they stay readable over bright ground. The
+header, the notes and the status are in Chinese by default (`--language en` for
 English); the boss lines themselves are the fixed format above.
+
+### Where the font comes from
+
+The client's HUD font is **VIPER NORA** (Dimitris K., pOPdOG fONTS, 1999), and it is
+not installed on the machine — it is baked into the client's Unity assets, which is
+exactly why naming a font family would find nothing. So the tool takes it from the
+client's own files:
+
+* the asset is only **read**, the same read-only posture as everything else;
+* the face is written to `~/.dfbossreminder/game-font.ttf` and loaded **privately**
+  into the process (`FR_PRIVATE`), so nothing is installed and the player's font list
+  is untouched;
+* **nothing is redistributed** — the bytes come from the installation the tool is
+  already reading, and they are never committed here.
+
+VIPER NORA has no CJK glyphs, so the Chinese header and notes are drawn in a
+CJK-capable face instead; each row picks by its own content, which is why the boss
+lines look exactly like the game while the notes stay readable. `--font` overrides the
+face, and `--no-game-font` uses an installed font only.
 
 A normal boss is one you walk to, so the third field is where it is from you:
 ``5LD1`` is five blocks left and one down, and ``U``/``D`` are up and down on the
@@ -75,13 +95,14 @@ cannot be compared with a map coordinate at all. See `docs/system-design.md` D2.
 
 | Piece | State |
 | --- | --- |
-| Domain (blocks, boss map parsing, whitelist, settings, plan) | **180 tests pass** on the development machine |
+| Domain (blocks, boss map parsing, whitelist, settings, plan) | **194 tests pass** on the development machine |
 | Profiler client (boss map, profile `gpscoords`) | **Verified live** against `dfprofiler.com` |
 | Console presentation, polling loop, settings persistence, `--once`, `--json` | **Verified live** on the game PC |
 | The overlay window and the client-rectangle locator | **Verified live on the game PC, 2026-09-22**: it appears over the client area, clicks pass through, and it does not take focus |
 | The below-minimap placement, both line formats, and the settings window | **Verified live on the game PC, 2026-09-22** — see `docs/evidence/2026-09-22-overlay-below-minimap-on-client.png` |
 | The refusal when the game is not running | **Unit-tested, not verified live** — the client was running during every session and closing it would have cost the player their game |
 | The transparent 10 px readout, the Chinese labels and the content-sized window | **Verified live on the game PC, 2026-09-22** — see `docs/evidence/2026-09-22-overlay-transparent-on-client.png` |
+| The client's own HUD font, extracted from its assets and loaded privately, and the right alignment | **Verified live on the game PC, 2026-09-22** — see `docs/evidence/2026-09-22-overlay-game-font-on-client.png` |
 
 The live Windows runs found seven defects no test on the development machine could
 see (blank CJK glyphs, a truncated minutes column, a font lookup bound to the wrong
@@ -131,7 +152,10 @@ uv run dfboss --show-config
 uv run dfboss --radius 20 --poll 30 --big-boss Dreadstag
 
 # somewhere else on screen instead of under the minimap, in a larger font
-uv run dfboss --anchor top-left --width 430 --font-size 14
+uv run dfboss --anchor top-left --width 430 --font-size 14 --align left
+
+# left-aligned text, and without the client's own font
+uv run dfboss --align left --no-game-font
 ```
 
 While it runs, **`F8` toggles whitelist mode** and remembers it. The toggle needs
@@ -157,7 +181,8 @@ question rather than becoming an automation one.
 
 ```text
 src/dfbossreminder/domain/     pure decision logic (stdlib only, runs on any OS)
-src/dfbossreminder/services/   the dfprofiler client and the game-window rectangle
+src/dfbossreminder/services/   the dfprofiler client, the game-window rectangle,
+                               and the client's own font read out of its assets
 src/dfbossreminder/ui/         the layered click-through overlay, its placement, the rows
 src/dfbossreminder/app.py      the process: settings, poll loop, presenters, CLI
 tools/pc/                      Windows-side scripts: build the exe, run it, probe the client
@@ -169,7 +194,7 @@ docs/windows-runbook.md        step-by-step instructions to run it on the game P
 ## Development
 
 ```sh
-uv run pytest                      # 180 domain, service, ui and app tests
+uv run pytest                      # 194 domain, service, ui and app tests
 uv run dfboss --once               # a live look, no window
 ```
 

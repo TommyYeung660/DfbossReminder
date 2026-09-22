@@ -40,6 +40,7 @@ PRESENTATIONS = ("overlay", "panel", "console")
 ANCHORS = ("below-minimap", "top-left", "top-right", "bottom-left", "bottom-right", "center")
 DIRECTION_STYLES = ("zh", "en", "compact")
 LANGUAGES = ("zh", "en")
+ALIGNMENTS = ("left", "right", "center")
 
 DEFAULT_BASE_URL = "https://www.dfprofiler.com"
 DEFAULT_WAYPOINT = ("Secronom Bunker", Block(1054, 987))
@@ -129,6 +130,11 @@ class Settings:
     # Empty means "let the overlay pick a fixed-pitch font that has CJK glyphs".
     # Set it to override, e.g. on a machine where the first choice is missing.
     font_face: str = ""
+    # The client's own HUD font (VIPER NORA) is taken from the game's own assets when
+    # it can be, so the readout matches the game's labels. Off makes the overlay use a
+    # font already installed on the machine instead.
+    game_font: bool = True
+    align: str = "right"
     waypoints: tuple[tuple[str, Block], ...] = (DEFAULT_WAYPOINT,)
     watch_pid_seconds: float = 5.0
 
@@ -333,6 +339,8 @@ def parse_settings(payload: object) -> Settings:
         opacity=_clamp_float(payload.get("opacity"), defaults.opacity, 0.0, 1.0),
         text_shadow=_as_bool(payload.get("text_shadow"), defaults.text_shadow),
         language=_one_of(payload.get("language"), LANGUAGES, defaults.language),
+        game_font=_as_bool(payload.get("game_font"), defaults.game_font),
+        align=_one_of(payload.get("align"), ALIGNMENTS, defaults.align),
         minimap_left=_clamp_int(payload.get("minimap_left"), defaults.minimap_left, -2000, 4000),
         minimap_top=_clamp_int(payload.get("minimap_top"), defaults.minimap_top, -2000, 4000),
         minimap_size=_clamp_int(payload.get("minimap_size"), defaults.minimap_size, 40, 800),
@@ -371,6 +379,8 @@ def to_dict(settings: Settings) -> dict:
         "opacity": settings.opacity,
         "text_shadow": settings.text_shadow,
         "language": settings.language,
+        "game_font": settings.game_font,
+        "align": settings.align,
         "minimap_left": settings.minimap_left,
         "minimap_top": settings.minimap_top,
         "minimap_size": settings.minimap_size,

@@ -99,6 +99,7 @@ def test_every_documented_field_survives_the_round_trip_unchanged() -> None:
         "anchor": "bottom-right", "offset_x": 20, "offset_y": 30, "width": 500,
         "height": 300, "max_rows": 20, "direction_style": "en",
         "font_face": "MS Gothic", "font_size": 15, "opacity": 0.5,
+        "game_font": False, "align": "left",
         "colours": {"list": "#00FF00", "big": "#FFFF00", "title": "#00AA00",
                     "note": "#888888", "background": "#000000", "border": "#333333"},
         "minimap_left": 1060, "minimap_top": 10, "minimap_size": 215, "minimap_gap": 6,
@@ -179,3 +180,17 @@ def test_the_shadow_and_the_language_round_trip() -> None:
 
 def test_an_unknown_language_falls_back_to_chinese() -> None:
     assert parse_settings({"language": "klingon"}).language == "zh"
+
+
+def test_the_alignment_defaults_to_right_and_is_settable() -> None:
+    # The readout hangs off the minimap's right edge, so right alignment is the default.
+    assert Settings().align == "right"
+    assert parse_settings({"align": "left"}).align == "left"
+    assert parse_settings({"align": "sideways"}).align == "right"
+
+
+def test_the_game_font_is_on_by_default_and_round_trips() -> None:
+    assert Settings().game_font is True
+    settings = parse_settings({"game_font": False})
+    assert settings.game_font is False
+    assert parse_settings(to_dict(settings)).game_font is False

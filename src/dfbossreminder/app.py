@@ -27,6 +27,7 @@ from pathlib import Path
 from . import __version__
 from .domain.plan import Plan, build_plan
 from .domain.settings import (
+    ALIGNMENTS,
     ANCHORS,
     DEFAULT_BASE_URL,
     DIRECTION_STYLES,
@@ -39,7 +40,9 @@ from .domain.settings import (
 )
 from .domain.whitelist import WhitelistError, parse_whitelist
 from .services.profiler import ProfilerClient, ProfilerError, fetch_state
-from .services.window import GameWindow, Rect, find_game_window, screen_rect
+from .services.gamefont import FONT_FAMILY as GAME_FONT_FAMILY
+from .services.gamefont import ensure_cached as ensure_game_font
+from .services.window import GameWindow, Rect, find_game_window, game_data_dir, screen_rect
 from .ui import layout, view
 from .ui.panel import Overlay, Row
 
@@ -147,6 +150,12 @@ def apply_overrides(settings: Settings, args: argparse.Namespace) -> tuple[Setti
     if args.hotkey:
         updates["hotkey"] = args.hotkey
         changed = True
+    if args.align:
+        updates["align"] = args.align
+        changed = True
+    if args.no_game_font:
+        updates["game_font"] = False
+        changed = True
     if args.text_shadow is not None:
         updates["text_shadow"] = args.text_shadow == "on"
         changed = True
@@ -241,11 +250,16 @@ class OverlayPresenter:
         settings: Settings,
         use_client_area: bool,
         hotkey: str = DEFAULT_TOGGLE_HOTKEY,
+        font_cache: Path | None = None,
         log=print,  # noqa: ANN001
     ) -> None:
         self.settings = settings
         self.use_client_area = use_client_area
         self.hotkey_name = hotkey
+        # Where the client's font is kept once it has been read out of its assets. It
+        # belongs beside the settings, in this project's own state directory - never in
+        # the repository, because the font is not this project's to redistribute.
+        self.font_cache = font_cache
         self.log = log
         self.notes: list[str] = []
         self.overlay: Overlay | None = None
@@ -297,7 +311,40 @@ class OverlayPresenter:
                                font_size=self.settings.font_size,
                                font_face=self.settings.font_face,
                                prefer_ascii=self.settings.direction_style == "en",
-                               text_shadow=self.settings.text_shadow)
+                               text_shadow=self.settings.text_shadow,
+                               align=self.settings.align)
+        if not self.settings.font_face:
+            # Confirming a face needs a device context, so the font arrives through the
+            # overlay rather than being passed into it.
+            self.overlay.set_face(self._game_font_face())
+
+    def _game_font_face(self) -> str:
+        """The client's own HUD font, loaded privately from the client's own files.
+
+        Not installed anywhere and not shipped: the bytes are read out of the game the
+        tool is already reading, cached in this project's state directory, and loaded
+        for this process only. When it cannot be had, the overlay falls back to a font
+        the machine already has and says which one it used.
+        """
+        if not self.settings.game_font or self.overlay is None or self.font_cache is None:
+            return ""
+        if not hasattr(self.overlay, "gdi32"):        # a stub in a test
+            return ""
+        cache = self.font_cache
+        data_dir = game_data_dir(self.window)
+        if data_dir is None:
+            self.notes.append("no game asset directory; using an installed font")
+            return ""
+        path = ensure_game_font(cache, data_dir)
+        if path is None:
+            self.notes.append(f"the game's font ({GAME_FONT_FAMILY}) was not found in its assets")
+            return ""
+        face = self.overlay.load_private_font(path, GAME_FONT_FAMILY)
+        if not face:
+            self.notes.append(f"could not load {path}")
+            return ""
+        self.notes.append(f"using the game's own font: {face}")
+        return face
         if self.hotkey_name:
             # Reported either way, because "the toggle works" is a claim that needs a
             # record: a silent failure here looks exactly like a hotkey nobody pressed.
@@ -369,7 +416,7 @@ class OverlayPresenter:
             self.overlay.close()
 
 
-def make_presenter(settings: Settings, log=print):  # noqa: ANN001, ANN201
+def make_presenter(settings: Settings, font_cache: Path | None = None, log=print):  # noqa: ANN001, ANN201
     """The presenter the settings ask for, degraded honestly when it is unavailable."""
     if settings.presentation == "console" or sys.platform != "win32":
         if settings.presentation != "console":
@@ -377,7 +424,8 @@ def make_presenter(settings: Settings, log=print):  # noqa: ANN001, ANN201
         return ConsolePresenter()
     try:
         return OverlayPresenter(settings, use_client_area=settings.presentation == "overlay",
-                                hotkey=settings.hotkey or DEFAULT_TOGGLE_HOTKEY, log=log)
+                                hotkey=settings.hotkey or DEFAULT_TOGGLE_HOTKEY,
+                                font_cache=font_cache, log=log)
     except GameNotRunning:
         # Requirement: no game, no overlay. Falling back to the console here would
         # silently ignore the setting the player chose, so it is reported instead.
@@ -606,6 +654,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="language of the header, notes and status (default zh)")
     parser.add_argument("--hotkey", metavar="KEY",
                         help="in-game whitelist toggle key (default F8; F1-F12, Insert, Home, End)")
+    parser.add_argument("--align", choices=ALIGNMENTS, help="readout text alignment")
+    parser.add_argument("--no-game-font", action="store_true",
+                        help="do not use the client's own HUD font")
     parser.add_argument("--font", metavar="FACE",
                         help="overlay font; default picks a fixed-pitch face with CJK glyphs")
     parser.add_argument("--big-boss", action="append", metavar="NAME", default=[],
@@ -716,7 +767,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_once(settings, client, args.json)
 
     try:
-        presenter = make_presenter(settings, log=print)
+        presenter = make_presenter(settings, font_cache=path.parent / "game-font.ttf", log=print)
     except GameNotRunning as error:
         print(str(error), file=sys.stderr)
         return 3

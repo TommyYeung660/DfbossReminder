@@ -12,6 +12,9 @@ here is an implementation fact at best.
 | `2026-09-22-overlay-surface.png` | The pixels the overlay itself handed to `UpdateLayeredWindow` on the game PC, with the zh bearing words rendering and the minutes column intact |
 | `2026-09-22-overlay-over-game-client.png` | The game's client area (`1280x720` at `242,134`) photographed from the desktop while the overlay was up: the readout sits over the game, and the game's own minimap reads `1057 X 1017` — the same block the readout's header shows |
 | `2026-09-22-window-probe.txt` | `tools/pc/probe-window.py` output: the client-rectangle measurement is correct on that display, and the game window is found at `1280x720` at `(242,134)` |
+| `2026-09-22-overlay-game-font-on-client.png` | The readout in the client's own HUD font (VIPER NORA), right-aligned, with the game's `HEALTHY`/`NOURISHED` labels at the top in the same face for comparison; the Chinese rows are in the CJK fallback |
+| `2026-09-22-overlay-game-font-right-aligned.png` | The same surface on its own |
+| `2026-09-22-overlay-game-font-run.txt` | The run: `font=VIPER NORA, CJK MS Gothic; align=right`, `using the game's own font: VIPER NORA`, the placement, and the captures written |
 | `2026-09-22-overlay-transparent-on-client.png` | The final readout: 10 px, bright green, **no backing box** — the game's terrain shows through — with the Chinese header and notes, and every note visible because the window sized itself to the content |
 | `2026-09-22-overlay-transparent-10px-formats.png` | The same surface on its own, composited over mid-grey by the overlay itself |
 | `2026-09-22-overlay-transparent-run.txt` | The run: the measured client rect, `transparent backing (text only); text shadow on`, `F8 toggles whitelist mode`, and the capture written |

@@ -193,6 +193,37 @@ because the surface is cleared to exactly zero first, and it is why the shadow c
 is near-black rather than black: a pure black shadow would be drawn and then discarded
 by the same rule.
 
+### D14 — The client's font is taken from the client, not shipped
+
+The readout is meant to look like the game, and the game's HUD font turned out to be
+**VIPER NORA** - a 1999 freeware face baked into the client's Unity assets and not
+installed on any machine, so naming it would find nothing. Three ways to close that
+gap, and why the third was chosen:
+
+* **name a similar installed font** - cheap, and wrong: the whole request is that it
+  looks like the game, and it would not;
+* **ship the TTF** - it renders exactly, but it redistributes someone else's font on a
+  licence that was written for embedding in a game, not for a third-party tool;
+* **read it out of the client's own installation** - exact, read-only, and nothing is
+  redistributed: the bytes come from the copy of the game the tool is already reading,
+  they are cached in this project's own state directory, and they are loaded with
+  ``FR_PRIVATE`` so no font is installed and the player's font list is untouched.
+
+The extractor's rule is what makes it safe on a 200 MB asset: a candidate font header
+counts only when its **own** ``name`` table contains the family being looked for, so a
+coincidental ``\x00\x01\x00\x00`` sequence cannot win. That rule is tested against
+a TrueType file the test builds itself, which is the only way to test an extractor
+whose real input cannot be shipped.
+
+### D15 — Two faces, chosen per row
+
+VIPER NORA has no CJK glyphs, so the Chinese header and notes cannot be drawn in it -
+they come out as empty boxes. Rather than give up either the game's look or the
+Chinese labels, the overlay keeps two faces and each row picks by its own content:
+boss lines (ASCII) in the client's font, rows containing Chinese in a CJK face.
+Without this the readout would be perfect boss lines sitting above four lines of
+boxes.
+
 ### D12 — The window follows its content
 
 The height was a fixed setting, and the live run showed it clipping the *notes* at the

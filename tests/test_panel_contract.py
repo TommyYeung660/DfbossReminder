@@ -64,11 +64,19 @@ def test_the_overlay_never_writes_to_the_game() -> None:
 
 
 def test_the_window_locator_only_reads() -> None:
-    # Measuring the client rectangle must not need focus, so the tools it uses are
-    # the read-only ones.
+    # Measuring the client rectangle must not need focus, so the tools it uses are the
+    # read-only ones. It does now open the process, on purpose: the client's own HUD
+    # font is taken from the installation the running executable came from. That handle
+    # is a *query* handle - asking for the image path needs no memory access at all -
+    # and the test pins that, because widening it to PROCESS_VM_READ or a write right
+    # would be a different project.
     assert "GetClientRect" in WINDOW_SOURCE
     assert "ClientToScreen" in WINDOW_SOURCE
-    assert "OpenProcess" not in WINDOW_SOURCE       # no process handle is needed at all
+    assert "PROCESS_QUERY_LIMITED_INFORMATION = 0x1000" in WINDOW_SOURCE
+    assert "PROCESS_VM_READ" not in WINDOW_SOURCE
+    assert "PROCESS_VM_WRITE" not in WINDOW_SOURCE
+    assert "PROCESS_VM_OPERATION" not in WINDOW_SOURCE
+    assert "WriteProcessMemory" not in WINDOW_SOURCE
 
 
 def test_the_overlay_raises_off_windows_rather_than_silently_doing_nothing() -> None:
@@ -84,6 +92,38 @@ def test_the_window_locator_reports_absence_off_windows() -> None:
         pytest.skip("this machine is Windows")
     assert window_module.find_game_window() is None
     assert window_module.screen_rect() is None
+
+
+def test_a_row_with_chinese_is_drawn_in_a_face_that_can_draw_it() -> None:
+    # The client's own HUD font (VIPER NORA) has no CJK glyphs, so the header and the
+    # notes would be a row of empty boxes beside boss lines that look perfect. Two faces
+    # are kept and each row picks by its content.
+    assert panel_module.needs_cjk("6 x Bandits | 1052 x 1018 | 5LD1") is False
+    assert panel_module.needs_cjk("20 格內") is True
+    assert panel_module.needs_cjk("）") is True           # fullwidth punctuation too
+    assert "font_cjk if needs_cjk(text) else self.font" in PANEL_SOURCE
+    assert "self.cjk_face != self.font_face" in PANEL_SOURCE
+
+
+def test_the_game_font_is_loaded_privately_and_never_installed() -> None:
+    # FR_PRIVATE loads the face for this process only: nothing is installed system-wide
+    # and the player's font list is untouched. The face name is read back, because
+    # asking for the wrong spelling silently gets a substitute.
+    assert panel_module.FR_PRIVATE == 0x10
+    assert "AddFontResourceExW" in PANEL_SOURCE
+    assert "RemoveFontResourceExW" in PANEL_SOURCE
+    assert "GetTextFaceW" in PANEL_SOURCE
+    # And nothing in this project may install a font for the whole machine.
+    for forbidden in ("WM_FONTCHANGE", "AddFontMemResourceEx"):
+        assert forbidden not in PANEL_SOURCE
+
+
+def test_the_alignment_is_a_gdi_flag() -> None:
+    assert panel_module.ALIGN_FLAGS["right"] == panel_module.DT_RIGHT == 0x00000002
+    assert panel_module.ALIGN_FLAGS["left"] == panel_module.DT_LEFT == 0
+    assert "ALIGN_FLAGS[self.align]" in PANEL_SOURCE
+    # An unknown alignment must not silently become right-aligned text drawn left.
+    assert 'self.align = align if align in ALIGN_FLAGS else "right"' in PANEL_SOURCE
 
 
 def test_a_row_is_just_text_and_a_colour() -> None:

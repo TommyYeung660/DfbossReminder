@@ -100,6 +100,18 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | **The frozen exe does not honour `PYTHONIOENCODING`**: the built executable wrote the console's own code page (Big5) even with the variable set to `utf-8`, so a redirected log was unreadable outside a Windows editor. The source run honoured it, so this is a property of the packaged build only | Recorded live | `Desktop\DFBossReminder.exe --once > e4.txt`, checked by byte inspection |
 | Pinning the streams to UTF-8 is safe for a console as well: Windows writes to a console through `WriteConsoleW` (PEP 528), which takes UTF-16 and renders it with the console font, so the stream encoding only decodes this process's own bytes | Implementation fact | `app._make_streams_safe`; verified by the same run showing `20 格內` |
 
+### Verified on the game PC, 2026-09-22 (fourth session: the client's own font)
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| The client's HUD font is **VIPER NORA** (Dimitris K., pOPdOG fONTS, 1999), and it is not installed on the machine - it is baked into the client's Unity assets | Recorded live | `sharedassets0.assets` contains the TTF's own `name` table: `'VIPER NORA'`, `'Dimitris K. - pOPdOG fONTS 1999'`, `'Macromedia Fontographer 4.1 23/3/1999'` |
+| The TTF can be read out of that asset: a 480,148-byte font whose `name` table carries `VIPER NORA` | Recorded live | extracted at `0xc094b60` of a 206,883,260-byte asset |
+| It renders as the game's own face: a sample line `+100% EXTRAORDINARY DAMAGE BOOST 194 / 400 (48%)` in the extracted font is indistinguishable from the game's HUD label of the same text | Recorded live | side-by-side in `docs/evidence/2026-09-22-overlay-game-font-on-client.png` |
+| Loading it privately works and the face name is confirmed, not assumed: `AddFontResourceExW` returned 1 and GDI reported `VIPER NORA` for the requested face | Recorded live | the render probe; `FR_PRIVATE` means nothing is installed system-wide |
+| The overlay uses it: `font=VIPER NORA, CJK MS Gothic; align=right; ... using the game's own font: VIPER NORA` | Recorded live | `docs/evidence/2026-09-22-overlay-game-font-run.txt` |
+| **VIPER NORA has no CJK glyphs**, so the Chinese labels cannot be drawn in it - the header and notes would be a row of empty boxes beside boss lines that look perfect. Two faces are kept and each row picks by its content | Recorded live | the render probe drew 個附近 as boxes; the capture shows the Chinese rows in MS Gothic |
+| The readout is right-aligned, so its rows share a right edge with the minimap | Recorded live | the same capture |
+
 ### Defects the live run found, and the fixes
 
 Running it on Windows was worth it for these alone: none was visible from the
