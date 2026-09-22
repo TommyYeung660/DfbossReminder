@@ -11,7 +11,7 @@
 #   tools/run_on_pc.sh 'py -3 tools\dfboss_main.py --once --user-id 14008279'
 #
 # The command text is written to <repo>\.run.cmd, the DFB-Interactive task is
-# triggered, and its output (.run-out.txt) is printed here.
+# triggered, and its output (.run-out-<run token>.txt) is printed here.
 #
 # One-time setup (already done on the game PC, recorded for a rebuild):
 #   ssh df-pc 'schtasks /create /tn DFB-Interactive /tr "cmd /c C:\DFTools\DfbossReminder\tools\pc\dfb-interactive.cmd" /sc once /st 23:59 /it /f'
@@ -55,7 +55,20 @@ trap 'rm -f "$command_file" "$output_file"' EXIT
 # A run token makes the wait loop immune to stale output: the scheduled task is
 # ignored while a previous instance is still running, so a plain "does the file
 # have EXITCODE" check can return another run's result.
+#
+# The token also names the output file. It used to be one shared .run-out.txt that the
+# runner deleted first, which fails in a way that looks like a hung PC: a command that
+# leaves a background process behind - an overlay started to keep running, say - hands
+# that process its inherited stdout handle, so the file cannot be deleted or rewritten
+# and every later run polls its own token in a file nobody is writing and times out.
+# A file per run cannot be held hostage by an earlier run's process.
 run_token="DFB-RUN-$(date +%s)-$$"
+# Two spellings of the same file, because the two callers disagree about separators:
+# scp wants the unix-ish form, while findstr and del reject a path whose last separator
+# is a forward slash and fail with only "cannot open" (findstr) or silence (del). Both
+# of those failing quietly is what a poll timeout looks like from here.
+remote_out="$REMOTE_REPO/.run-out-$run_token.txt"
+remote_out_shell="$REMOTE_REPO\\.run-out-$run_token.txt"
 {
     printf 'chcp 65001 >nul\r\n'
     printf 'set PYTHONIOENCODING=utf-8\r\n'
@@ -68,24 +81,33 @@ run_token="DFB-RUN-$(date +%s)-$$"
     printf 'echo EXITCODE=%%ERRORLEVEL%%\r\n'
 } > "$command_file"
 
+token_file="$(mktemp)"
+printf '%s' "$run_token" > "$token_file"
+
 scp -q -o BatchMode=yes "$command_file" "$HOST:$REMOTE_REPO/.run.cmd"
-remote "del /q \"$REMOTE_REPO\\.run-out.txt\" 2>nul & schtasks /run /tn $TASK" >/dev/null
+# How the task wrapper learns which output file to write: it cannot be given an
+# argument, so the name travels in the body of .run-token.txt.
+scp -q -o BatchMode=yes "$token_file" "$HOST:$REMOTE_REPO/.run-token.txt"
+rm -f "$token_file"
+remote "schtasks /run /tn $TASK" >/dev/null
 
 # Poll for the completion marker. The wrapper writes EXITCODE= only after the
 # command returns, so this is also what tells us it is safe to read the file.
 started=$SECONDS
 finished=0
 while ((SECONDS - started < TIMEOUT)); do
-    if remote_status "findstr /c:\"$run_token\" \"$REMOTE_REPO\\.run-out.txt\"" &&
-        remote_status "findstr /c:\"EXITCODE=\" \"$REMOTE_REPO\\.run-out.txt\""; then
+    if remote_status "findstr /c:\"$run_token\" \"$remote_out_shell\"" &&
+        remote_status "findstr /c:\"EXITCODE=\" \"$remote_out_shell\""; then
         finished=1
         break
     fi
     sleep 5
 done
 
-scp -q -o BatchMode=yes "$HOST:$REMOTE_REPO/.run-out.txt" "$output_file"
+scp -q -o BatchMode=yes "$HOST:$remote_out" "$output_file"
 cat "$output_file"
+# This run's file only, and only now that it has been read.
+remote "del /q \"$remote_out_shell\" 2>nul" >/dev/null
 
 if ((finished == 0)); then
     echo "--- still running after ${TIMEOUT}s; output above is partial ---" >&2

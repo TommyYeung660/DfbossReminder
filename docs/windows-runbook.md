@@ -30,6 +30,16 @@
    成功會印出 `Built C:\Users\...\Desktop\DFBossReminder.exe (… bytes, …)`。
    建置產物直接放在桌面，不要再多一次複製步驟。
 
+   **重建前一定要先停掉正在跑的 overlay**，否則舊的 exe 被佔住，PyInstaller 只會
+   吐出 `PermissionError: [WinError 5]` 然後 `build failed`：
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File tools\pc\stop-dfboss.ps1
+   ```
+
+   這支腳本只停 DFBossReminder 自己（含原始碼啟動的那些），不會動到遊戲。
+   重建完要恢復原狀的話，雙擊桌面上的 `DFBossReminder.exe` 即可。
+
 4. 先做一次純文字檢查（不開視窗、不進遊戲）：
 
    ```powershell
