@@ -444,3 +444,31 @@ def test_the_hotkey_is_configurable_because_f8_is_not_always_free() -> None:
     args = app.build_parser().parse_args(["--hotkey", "F6"])
     settings, save = app.apply_overrides(Settings(), args)
     assert settings.hotkey == "F6" and save
+
+
+# --------------------------------------------- the console's encoding
+
+
+def test_the_streams_are_pinned_to_utf8() -> None:
+    # Not left to the environment: the frozen exe ignores PYTHONIOENCODING, so a
+    # redirected log came back as Big5 bytes. UTF-8 is also right for a console, since
+    # Windows writes to a console through WriteConsoleW (PEP 528) and only decodes our
+    # bytes on the way through.
+    class Stream:
+        def __init__(self) -> None:
+            self.options: dict = {}
+
+        def reconfigure(self, **options) -> None:  # noqa: ANN003
+            self.options = options
+
+    out, err = Stream(), Stream()
+    original = (app.sys.stdout, app.sys.stderr)
+    try:
+        app.sys.stdout, app.sys.stderr = out, err
+        app._make_streams_safe()
+    finally:
+        app.sys.stdout, app.sys.stderr = original
+    for stream in (out, err):
+        assert stream.options["encoding"] == "utf-8"
+        assert stream.options["errors"] == "replace"
+        assert stream.options["line_buffering"]

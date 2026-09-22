@@ -210,3 +210,5 @@ PASS: clicks pass through to the window underneath, and focus was not taken
 * 視窗高度是**上限**，會跟著內容自動增減，所以底部的中文備註不會被切掉；
   真的超過上限時，最後一行會寫「（還有 N 行未顯示）」。
 * 標籤（標題、備註、狀態）預設中文，`--language en` 可切英文；boss 那幾行是固定格式。
+* 輸出（含 `-Once` 的記錄檔）固定用 **UTF-8**，所以抓回 Mac 或任何編輯器都讀得懂。
+  注意：冷凍的 exe **不理 `PYTHONIOENCODING`**，所以編碼是在程式裡決定的，不是靠環境變數。

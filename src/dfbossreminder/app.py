@@ -645,6 +645,24 @@ class _NullStream:
 
 
 def _make_streams_safe() -> None:
+    """Replace missing streams, and pin the encoding of the ones that exist.
+
+    UTF-8, unconditionally, and chosen here rather than left to the environment. Two
+    reasons, both found the hard way:
+
+    * the **frozen exe does not honour ``PYTHONIOENCODING``** - the built executable
+      wrote the console's own code page even with the variable set, so a redirected log
+      came back as Big5 bytes that nothing but a Windows editor could read;
+    * it is safe for a real console window too, and for a reason worth writing down:
+      on Windows, Python writes to a console through ``WriteConsoleW`` (PEP 528), which
+      takes UTF-16 and renders it with the console's font. The stream's encoding is
+      only used to decode *our own bytes* on the way through, so UTF-8 is correct there
+      as well - a Chinese character reaches the console as a Chinese character whatever
+      the code page is set to.
+
+    ``errors="replace"`` keeps a character a target cannot represent from killing a tool
+    that has already done its work.
+    """
     if sys.stdout is None:
         sys.stdout = _NullStream()          # type: ignore[assignment]
     if sys.stderr is None:
@@ -654,7 +672,7 @@ def _make_streams_safe() -> None:
         if reconfigure is None:
             continue
         try:
-            reconfigure(line_buffering=True, errors="replace")
+            reconfigure(encoding="utf-8", line_buffering=True, errors="replace")
         except (ValueError, OSError):
             continue
 

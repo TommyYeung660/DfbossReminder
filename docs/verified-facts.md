@@ -97,6 +97,8 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | The header, notes and status are Chinese by default and English with `--language en`; the boss lines are the fixed format in both | Recorded live + Implementation fact | the capture, and `tests/test_view.py` |
 | **F8 is free on the game PC** (only F12 is held by something else), so the earlier "could NOT register F8" was two of this project's own overlays competing, not a conflict with another application | Recorded live | `tools/pc/probe-hotkeys.py`; the failure disappeared once the previous instance had exited |
 | The toggle key is a setting, so a machine where it *is* taken can pick another | Implementation fact | `settings.hotkey`, `--hotkey` |
+| **The frozen exe does not honour `PYTHONIOENCODING`**: the built executable wrote the console's own code page (Big5) even with the variable set to `utf-8`, so a redirected log was unreadable outside a Windows editor. The source run honoured it, so this is a property of the packaged build only | Recorded live | `Desktop\DFBossReminder.exe --once > e4.txt`, checked by byte inspection |
+| Pinning the streams to UTF-8 is safe for a console as well: Windows writes to a console through `WriteConsoleW` (PEP 528), which takes UTF-16 and renders it with the console font, so the stream encoding only decodes this process's own bytes | Implementation fact | `app._make_streams_safe`; verified by the same run showing `20 格內` |
 
 ### Defects the live run found, and the fixes
 
