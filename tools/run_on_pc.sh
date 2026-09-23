@@ -89,6 +89,13 @@ scp -q -o BatchMode=yes "$command_file" "$HOST:$REMOTE_REPO/.run.cmd"
 # argument, so the name travels in the body of .run-token.txt.
 scp -q -o BatchMode=yes "$token_file" "$HOST:$REMOTE_REPO/.run-token.txt"
 rm -f "$token_file"
+# A previous instance may still be marked running - a run whose process was killed by
+# hand leaves it that way - and the scheduler then ignores every new trigger. That looks
+# exactly like a hung PC from here: no output, no error, just a timeout. Ending it is
+# harmless when there is nothing to end (the error is discarded), but note what it costs:
+# a process an earlier run *detached* (``start ""``) can be in that task's process tree and
+# go down with it, so an overlay left running that way may need starting again.
+remote "schtasks /end /tn $TASK" >/dev/null
 remote "schtasks /run /tn $TASK" >/dev/null
 
 # Poll for the completion marker. The wrapper writes EXITCODE= only after the

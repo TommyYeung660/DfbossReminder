@@ -322,6 +322,50 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
     check(account, "位置不明時列出所有 boss",
           "show_all_without_player", settings.show_all_without_player)
 
+    # ---------------------------------------------------------------- placement
+    placement = section("顯示位置")
+    choice(placement, "顯示方式", "presentation", PRESENTATIONS, settings.presentation)
+    choice(placement, "對齊位置", "anchor", ANCHORS, settings.anchor)
+    entry(placement, "對齊位移 x", "offset_x", value=settings.offset_x)
+    entry(placement, "對齊位移 y", "offset_y", value=settings.offset_y)
+
+    # Near the top on purpose: this is the section the player touches while the game is
+    # running - moving the readout out of the way or back into place - and the form is
+    # taller than the screen, so anything below the fold needs scrolling to reach.
+    #
+    # The readout no longer follows the game window (it moved under the player while
+    # they were reading it, and they asked for that to go). The arrows act on a running
+    # readout at once as a live adjustment, and 重新校正位置 drops that adjustment and
+    # re-reads this section - which is also what makes a game window that has *moved*
+    # recoverable without stopping and starting the overlay.
+    nudge = ttk.LabelFrame(placement, text="位置微調", padding=8)
+    nudge.pack(fill="x", pady=(8, 0))
+    arrow_row = ttk.Frame(nudge)
+    arrow_row.pack(anchor="w")
+    step_var = tk.StringVar(value=str(NUDGE_STEP))
+    ttk.Label(arrow_row, text="每按一次（px）").pack(side="left")
+    ttk.Entry(arrow_row, textvariable=step_var, width=5).pack(side="left", padx=4)
+    for label, direction in (("←", "left"), ("→", "right"), ("↑", "up"), ("↓", "down")):
+        ttk.Button(arrow_row, text=label, width=3,
+                   command=lambda d=direction: do_nudge(d)).pack(side="left", padx=1)
+    # The callbacks are defined further down, with the rest of the actions, so these
+    # buttons call them through a lambda - the name is looked up when the button is
+    # pressed, which is also how the arrows above work.
+    ttk.Button(arrow_row, text="重新校正位置",
+               command=lambda: do_realign()).pack(side="left", padx=(10, 0))
+    ttk.Label(nudge, text="箭頭按一下移一步，只是臨時微調，不會存進設定；"
+                          "overlay 正在跑時會立刻看到。\n"
+                          "「重新校正位置」把微調歸零，回到上面「對齊位置／對齊位移」"
+                          "設定的位置 —— 遊戲視窗移動過之後也按它。",
+              foreground="#666666", justify="left").pack(anchor="w", pady=(4, 0))
+
+    ttk.Label(placement, text="below-minimap 用小地圖的矩形，座標是客戶區座標：").pack(
+        anchor="w", pady=(6, 0))
+    entry(placement, "小地圖 left", "minimap_left", value=settings.minimap_left)
+    entry(placement, "小地圖 top", "minimap_top", value=settings.minimap_top)
+    entry(placement, "小地圖 size", "minimap_size", value=settings.minimap_size)
+    entry(placement, "小地圖下方間距", "minimap_gap", value=settings.minimap_gap)
+
     # ------------------------------------------------------- coordinate styles
     styles = section("座標樣式（命中的 boss 用這個顏色顯示）")
     ttk.Label(styles, text="座標      顏色        （1015,999 或 1015,999:2 表示連周圍兩格）",
@@ -417,36 +461,6 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
         ttk.Button(line, text="選擇", width=9,
                    command=lambda k=key, s=swatch: pick_colour(k, s)).pack(side="left")
 
-    # ---------------------------------------------------------------- placement
-    placement = section("顯示位置")
-    choice(placement, "顯示方式", "presentation", PRESENTATIONS, settings.presentation)
-    choice(placement, "對齊位置", "anchor", ANCHORS, settings.anchor)
-    entry(placement, "對齊位移 x", "offset_x", value=settings.offset_x)
-    entry(placement, "對齊位移 y", "offset_y", value=settings.offset_y)
-
-    # The readout no longer follows the game window - it moved under the player while
-    # they were reading it, and the player asked for that to go. Position is set here
-    # instead, and the arrows act on a running readout immediately so it can be aimed.
-    nudge = ttk.LabelFrame(placement, text="位置微調", padding=8)
-    nudge.pack(fill="x", pady=(8, 0))
-    arrow_row = ttk.Frame(nudge)
-    arrow_row.pack(anchor="w")
-    step_var = tk.StringVar(value=str(NUDGE_STEP))
-    ttk.Label(arrow_row, text="每按一次（px）").pack(side="left")
-    ttk.Entry(arrow_row, textvariable=step_var, width=5).pack(side="left", padx=4)
-    for label, direction in (("←", "left"), ("→", "right"), ("↑", "up"), ("↓", "down")):
-        ttk.Button(arrow_row, text=label, width=3,
-                   command=lambda d=direction: do_nudge(d)).pack(side="left", padx=1)
-    ttk.Label(nudge, text="按一下就把 overlay 移一步；overlay 正在跑時會立刻看到。",
-              foreground="#666666").pack(anchor="w", pady=(4, 0))
-
-    ttk.Label(placement, text="below-minimap 用小地圖的矩形，座標是客戶區座標：").pack(
-        anchor="w", pady=(6, 0))
-    entry(placement, "小地圖 left", "minimap_left", value=settings.minimap_left)
-    entry(placement, "小地圖 top", "minimap_top", value=settings.minimap_top)
-    entry(placement, "小地圖 size", "minimap_size", value=settings.minimap_size)
-    entry(placement, "小地圖下方間距", "minimap_gap", value=settings.minimap_gap)
-
     # ------------------------------------------------------------- big bosses
     big = section("大型／終極 boss（顯示結束時間）")
     ttk.Label(big, text="一行一個名稱。boss 地圖沒有分級欄位，所以由這份清單決定\n"
@@ -473,15 +487,12 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
         return normalized(payload_from_form(collect()))
 
     def do_nudge(direction: str) -> None:
-        """Move the readout one step and remember where it ended up.
+        """Move the readout one step, as a live adjustment of the configured position.
 
-        Works whether or not the overlay is running: with it up, the move is immediate;
-        with it down, the offset is stored so the next 開始 uses it.
-
-        The move is saved **on top of the file's settings**, not on top of the form: a
-        half-typed edit that has not been saved yet must not be written by pressing an
-        arrow, and a rule with a typo in it must not be able to slip into the file through
-        the position buttons.
+        It works on a running overlay only, and it is **not saved**: 顯示位置 holds the
+        position the player configured, so 重新校正位置 can always put the readout back
+        there. Saving the arrows into 對齊位移 - which this did first - made that button do
+        nothing, because the "configured" position moved with every press.
         """
         if controller is None:
             return
@@ -490,16 +501,10 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
         except ValueError:
             step = NUDGE_STEP
             step_var.set(str(NUDGE_STEP))
-        # Written into the boxes as well: they are the record of where the readout is, and
-        # leaving them stale would make the next 儲存 undo the move.
-        moved, message = controller.nudge(load(), direction, step)
-        variables["offset_x"].set(str(moved.offset_x))
-        variables["offset_y"].set(str(moved.offset_y))
-        try:
-            save(moved)
-        except OSError as error:
-            status.configure(text=f"移動了，但存不進設定檔：{error}")
-            return
+        settings_now, _notes = current()
+        message = controller.nudge(settings_now, direction, step)
+        if not controller.running():
+            message += "（overlay 沒在跑，開始後才會看到）"
         status.configure(text=message)
 
     def style_problem() -> str:
@@ -563,6 +568,46 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
         big_box.insert("1.0", fresh["big_bosses"])
         status.configure(text=f"已從 {path} 重新載入")
 
+    def do_realign() -> None:
+        """Put the readout back where 顯示位置 says: drop the arrows' adjustment, re-read.
+
+        The replacement for the deleted auto-follow: the overlay no longer re-anchors
+        itself when the game window moves, so this is the button that makes a moved window
+        recoverable, and the one that undoes the position arrows. It also applies an edited
+        anchor or minimap rectangle without a restart, because it saves the form first and
+        hands those settings to the running readout.
+        """
+        if controller is None:
+            return
+        problem = style_problem()
+        if problem:
+            messagebox.showerror("DFBossReminder", f"座標樣式有問題，尚未儲存：\n\n{problem}")
+            return
+        settings_now, _notes = current()
+        try:
+            save(settings_now)
+        except OSError as error:
+            status.configure(text=f"重新校正了，但存不進設定檔：{error}")
+            return
+        _ok, message = controller.realign(settings_now)
+        status.configure(text=message)
+        refresh_buttons()
+
+    def refresh_buttons() -> None:
+        """The start/stop pair follows whether the readout is really running.
+
+        Read from the controller rather than remembered from the last press: an overlay
+        that stopped because it crashed, or one that was started before this window was
+        opened, would leave the pair lying about it.
+        """
+        if controller is None:
+            start_button.state(["disabled"])
+            stop_button.state(["disabled"])
+            return
+        live = controller.running()
+        start_button.state(["disabled"] if live else ["!disabled"])
+        stop_button.state(["!disabled"] if live else ["disabled"])
+
     def do_start() -> None:
         """Save what the form says, then run the readout from it."""
         if controller is None:
@@ -583,8 +628,7 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
             return
         ok, message = controller.start(settings_now)
         status.configure(text=message)
-        start_button.state(["disabled"] if ok else ["!disabled"])
-        stop_button.state(["!disabled"] if ok else ["disabled"])
+        refresh_buttons()
         if not ok:
             # The refusal is a sentence, not a traceback: "the game is not running" is
             # the most likely answer, and it has to read as an instruction.
@@ -594,8 +638,7 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
         if controller is None:
             return
         status.configure(text=controller.stop())
-        start_button.state(["!disabled"])
-        stop_button.state(["disabled"])
+        refresh_buttons()
 
     def on_close() -> None:
         # One program, one lifetime: closing the window stops the readout it started,
@@ -609,6 +652,7 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
     start_button.pack(side="left")
     stop_button = ttk.Button(actions, text="停止", command=do_stop, state="disabled")
     stop_button.pack(side="left", padx=6)
+    refresh_buttons()
     ttk.Separator(actions, orient="vertical").pack(side="left", fill="y", padx=8)
     ttk.Button(actions, text="儲存", command=do_save).pack(side="left")
     ttk.Button(actions, text="重新載入", command=do_reload).pack(side="left", padx=8)

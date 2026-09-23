@@ -1,21 +1,28 @@
-DFB interactive run 23/09/2026 �g�T 11:48:27.53
+DFB interactive run 23/09/2026 �g�T 12:22:45.58
 session: interactive desktop (scheduled task)
 
-DFB-RUN-1790135307-24476
+DFB-RUN-1790137365-75918
 the window was built withdrawn; viewable=False
-100 labels, 0 starts recorded so far
+101 labels, 0 starts recorded so far
 style rows rendered: 2 (2 rules configured)
-開始 (real controller): 運行中：overlay visible=True at (1246,359)-(1586,779); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
+開始 (real controller): 運行中：overlay visible=True at (1301,329)-(1641,749); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
 the position arrows were pressed; the real controller was nudged in place
 
-controller message: 運行中：overlay visible=True at (1246,359)-(1586,779); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
-after 8s: 運行中：overlay visible=True at (1246,359)-(1586,779); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
-the game window is still there, and the readout kept drawing
+controller message: 運行中：overlay visible=True at (1301,329)-(1641,749); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
+after 6s: the game window is still there and the readout kept drawing
+after 開始: 1 overlay window(s), rect (1301, 329, 1641, 453)
+after four arrow presses: 1 overlay window(s), rect (1281, 329, 1621, 453)
+after 重新校正位置: 1 overlay window(s), rect (1301, 329, 1641, 453)
 stopping: 已停止
 stopped, running=False
+after 停止: 0 overlay window(s)
+second 開始: 運行中：overlay visible=True at (1301,329)-(1641,749); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
+after a second 開始: 1 overlay window(s), rect (1301, 329, 1641, 453)
+final stop: 已停止
+after the final 停止: 0 overlay window(s)
 
 --- what the run printed ---
-fetched 15 boss events; player 1057,1017
+fetched 22 boss events; player 1057,1017fetched 22 boss events; player 1057,1017
 
 PASS: the window has the styles table, the start button and the position arrows, and nothing of the whitelist
 EXITCODE=0

@@ -23,6 +23,7 @@ runbook use.
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import sys
 import threading
@@ -260,6 +261,12 @@ class OverlayPresenter:
         self.notes: list[str] = []
         self.overlay: Overlay | None = None
         self.window: GameWindow | None = None
+        # A temporary adjustment on top of the configured offsets, moved by the settings
+        # window's arrows. Deliberately **not** a setting and never saved: the position the
+        # player configured is the one 顯示位置 says, so there is always something for
+        # 重新校正位置 to return to. A nudge that overwrote the configuration would make
+        # that button do nothing, which is exactly what it did before.
+        self.adjustment: tuple[int, int] = (0, 0)
         # Every overlay presentation needs the client: ``overlay`` and ``below-minimap``
         # to anchor inside it, and ``panel`` because a readout of a game that is not
         # running has nothing to say. This raises GameNotRunning, which main reports.
@@ -283,6 +290,12 @@ class OverlayPresenter:
         anchor on a bottom edge is measured *up* from that edge, so it has to know how
         tall the thing it is placing turned out to be.
         """
+        left, top = self._anchored_corner(area, height)
+        # The live adjustment, applied last so it means the same thing on every anchor.
+        return left + self.adjustment[0], top + self.adjustment[1]
+
+    def _anchored_corner(self, area: Rect, height: int) -> tuple[int, int]:
+        """Where the configured position puts the window, before any live adjustment."""
         if self.settings.anchor == "below-minimap":
             # Measured from the client area, so it needs the client even when the
             # presentation is ``panel``; that is why the game window is required above.
@@ -377,18 +390,27 @@ class OverlayPresenter:
             Row(view.status_text("hidden_rows", settings.language, count=hidden),
                 settings.colour("note")),)
 
-    def reposition(self) -> str:
-        """Put the window where the settings now say it goes.
+    def reposition(self, settings: Settings | None = None,
+                   nudge: tuple[int, int] | None = None) -> str:
+        """Put the window where the settings say it goes, plus any live adjustment.
 
         The readout used to *follow* the client, re-anchoring itself under the minimap
         every few seconds. The player asked for that to go on 2026-09-23: it moved the
         list under them while they were reading it, it re-measured a window that had not
         moved, and there was no way to switch it off. Position is now decided once at
-        start and afterwards only when the player moves it from the settings window -
-        which is why this takes no arguments: it re-reads the same settings a start would.
+        start and afterwards only when the player asks - with the position arrows (the
+        live ``nudge``) or with 重新校正位置, which drops the nudge and re-reads these
+        settings, and is how a game window that *has* moved gets accounted for.
+
+        ``settings`` is optional so the caller can pass the values it is about to save:
+        the presenter's own copy is a tick behind while the loop is running.
         """
         if self.overlay is None:
             return ""
+        if settings is not None:
+            self.settings = settings
+        if nudge is not None:
+            self.adjustment = (int(nudge[0]), int(nudge[1]))
         area, _note = self._area()
         left, top = self._corner(area, self.overlay.height)
         if (left, top) == (self.overlay.left, self.overlay.top):
@@ -456,6 +478,13 @@ class Watch:
         self.failures = 0
         self.next_fetch = 0.0
         self.dumped = False
+        # Requests from outside this loop, for the window's thread to answer. See
+        # request_settings for why they cannot be done directly.
+        self._requests: collections.deque = collections.deque()
+        self._requests_lock = threading.Lock()
+        # Which thread owns the overlay window: set by run(), and the one that is allowed
+        # to move or destroy it.
+        self.loop_thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------ fetching
     def refresh(self, now: float) -> None:
@@ -513,40 +542,87 @@ class Watch:
                 self.dumped = True
                 self.log(f"overlay surface written to {written}; {self.presenter.describe()}")
 
-    def relocate(self, settings: Settings) -> str:
-        """Adopt new settings (a position nudge) and move the window now.
+    def request_settings(self, settings: Settings, nudge: tuple[int, int] | None = None,
+                         timeout: float = 5.0) -> str:
+        """Ask this loop's own thread to adopt these settings and move the window.
 
-        Called from the settings window while this loop is running in a thread, so it
-        only replaces the settings object and asks the presenter to move - the next tick
-        draws with the new settings either way, and this makes the move immediate instead
-        of up to one tick later.
+        Nothing else may move the overlay. A window belongs to the thread that created it,
+        and ``SetWindowPos`` from another thread sends messages to the owner and waits for
+        it to process them - so with the settings window's thread calling it and this one
+        never pumping a message loop, the call blocks **forever**. That is not a theory: the
+        position arrows hung the settings window exactly this way.
+
+        So the request is queued, the loop performs it between its sleep slices, and this
+        waits for the result. The timeout is there because a fetch can be in flight; when it
+        runs out, the answer says the move did not happen rather than pretending it did.
         """
+        if not self._loop_is_this_thread():
+            done = threading.Event()
+            result: list[str] = [""]
+            with self._requests_lock:
+                self._requests.append((settings, nudge, done, result))
+            if not done.wait(timeout=timeout):
+                return ""
+            return result[0]
+        # Called from the loop's own thread (a test, or a future single-threaded caller):
+        # do it here, there is nothing to hand over.
         self.settings = settings
         move = getattr(self.presenter, "reposition", None)
-        return move() if move else ""
+        return move(settings, nudge) if move else ""
+
+    def _loop_is_this_thread(self) -> bool:
+        """Whether this call may touch the window directly.
+
+        True when the loop has not started (nothing owns a window yet, so there is nothing
+        to hand over and no thread to wait for) or when this *is* the loop's thread.
+        """
+        return self.loop_thread is None or self.loop_thread is threading.current_thread()
+
+    def _drain_requests(self) -> None:
+        """Perform whatever the settings window has asked for, on this thread."""
+        while True:
+            with self._requests_lock:
+                if not self._requests:
+                    return
+                settings, nudge, done, result = self._requests.popleft()
+            self.settings = settings
+            move = getattr(self.presenter, "reposition", None)
+            try:
+                result[0] = move(settings, nudge) if move else ""
+            except Exception as error:                 # noqa: BLE001 - reported, not raised
+                result[0] = f"移動失敗：{error}"
+                self.log(f"could not move the readout: {error}")
+            finally:
+                done.set()
 
     def run(self, seconds: float | None = None, stop: threading.Event | None = None) -> None:
         """Loop until the time is up, the stop flag is set, or the process is interrupted.
 
         ``stop`` is what lets the settings window run this in a thread and take it back
         down on 停止. Both ends are checked before the first draw and after every sleep,
-        so stopping never waits for a fetch.
+        so stopping never waits for a fetch. The same slices are where requests from the
+        window (a nudge, a re-anchor) are carried out - on this thread, because this is the
+        one that owns the window.
         """
+        self.loop_thread = threading.current_thread()
         started = time.monotonic()
+        self._drain_requests()
         self.tick(time.monotonic())
         try:
             while not (stop and stop.is_set()):
                 if seconds is not None and time.monotonic() - started >= seconds:
                     break
-                # The sleep is in slices so 停止 is responsive: a full console interval
-                # is five seconds, and a button that takes five seconds to react reads as
-                # a button that did not work.
+                # The sleep is in slices so 停止 is responsive and so a request from the
+                # window is answered within a tenth of a second: a full console interval is
+                # five seconds, and a button that takes five seconds to react reads as a
+                # button that did not work.
                 slept = 0.0
                 while slept < self.interval:
                     if stop and stop.is_set():
                         return
                     time.sleep(0.1)
                     slept += 0.1
+                    self._drain_requests()
                 self.tick(time.monotonic())
         finally:
             self.presenter.close()
@@ -629,17 +705,39 @@ class OverlayController:
     stops it, a position nudge takes effect immediately, and there is no second process
     to lose track of or to leave behind.
 
+    The window is created, drawn and destroyed **on that one worker thread**, never on the
+    one the settings window runs on. That is a Windows rule and not a style choice:
+    ``DestroyWindow`` only works from the thread that created the window, so an overlay
+    created on the GUI thread could not be taken down from the worker - 停止 appeared to
+    do nothing, the window stayed on screen, and pressing 開始 again stacked a second
+    overlay on top of it while two threads drew into the same device contexts. The player
+    reported exactly that, ending in a crash. So the worker thread reports back through
+    ``_ready`` when the overlay is up (or why it is not) and owns it from then on.
+
     Everything the window needs is a method here, so the window itself has no opinion
     about presenters, threads or Windows - which is also what keeps it testable.
     """
+
+    # How long 開始 waits for the worker thread to say whether the overlay came up, and how
+    # long 停止 waits for it to finish. Generous: both are local work with a window in it.
+    START_TIMEOUT = 20.0
+    STOP_TIMEOUT = 15.0
+    # How long a position request waits for the loop's thread to carry it out. The loop
+    # answers within a tenth of a second unless a fetch is in flight, so this is generous.
+    REQUEST_TIMEOUT = 5.0
 
     def __init__(self, path: Path, log=print) -> None:  # noqa: ANN001
         self.path = path
         self.log = log
         self.watch: Watch | None = None
+        # The live position adjustment, and the reason it lives here rather than in the
+        # settings: see nudge.
+        self.adjustment: tuple[int, int] = (0, 0)
         self.stop_event: threading.Event | None = None
         self.thread: threading.Thread | None = None
         self.message = "未啟動"
+        self._ready = threading.Event()
+        self._outcome: tuple[bool, str] = (False, "未啟動")
 
     # ------------------------------------------------------------------ lifecycle
     def running(self) -> bool:
@@ -655,29 +753,54 @@ class OverlayController:
         if self.running():
             return True, "已經在運行"
         try:
-            presenter = make_presenter(settings, font_cache=self.path.parent / "game-font.ttf",
-                                       log=self.log)
-        except GameNotRunning as error:
-            self.message = str(error).splitlines()[0]
-            return False, self.message
-        try:
             save_settings(self.path, settings)
         except OSError as error:
             self.log(f"could not save settings: {error}")
-        client = ProfilerClient(settings.base_url or DEFAULT_BASE_URL)
-        self.watch = Watch(settings, client, presenter, self.path, log=self.log)
         self.stop_event = threading.Event()
+        self._ready = threading.Event()
+        self._outcome = (False, "逾時")
         # A daemon thread, so a window closed without 停止 still takes the overlay with
         # it: one program, one lifetime.
-        self.thread = threading.Thread(target=self._run, name="dfboss-overlay", daemon=True)
+        self.thread = threading.Thread(target=self._run, args=(settings,),
+                                       name="dfboss-overlay", daemon=True)
         self.thread.start()
-        self.message = f"運行中：{presenter.describe()}"
-        return True, self.message
+        if not self._ready.wait(timeout=self.START_TIMEOUT):
+            self.message = "overlay 起不來（等待逾時）"
+            return False, self.message
+        self.message = self._outcome[1]
+        return self._outcome
 
-    def _run(self) -> None:
-        assert self.watch is not None and self.stop_event is not None
+    def _run(self, settings: Settings) -> None:
+        """The readout's whole life, on one thread: create, draw, destroy."""
+        stop = self.stop_event
+        note = ""
+        presenter = None
         try:
-            self.watch.run(stop=self.stop_event)
+            presenter = make_presenter(settings, font_cache=self.path.parent / "game-font.ttf",
+                                       log=self.log)
+        except GameNotRunning as error:
+            self._outcome = (False, str(error).splitlines()[0])
+            self._ready.set()
+            return
+        except (OSError, RuntimeError) as error:
+            self._outcome = (False, f"overlay 開不起來：{error}")
+            self._ready.set()
+            return
+        if getattr(presenter, "kind", "") != "overlay":
+            # make_presenter falls back to the console rather than failing. For a window
+            # with a 開始 button that is the wrong answer to give quietly: the player would
+            # press it and see nothing, so it is reported and the run ends here.
+            note = f"只能開主控台模式（{presenter.describe()}）"
+            self._outcome = (False, note)
+            self._ready.set()
+            presenter.close()
+            return
+        self.watch = Watch(settings, ProfilerClient(settings.base_url or DEFAULT_BASE_URL),
+                           presenter, self.path, log=self.log)
+        self._outcome = (True, f"運行中：{presenter.describe()}")
+        self._ready.set()
+        try:
+            self.watch.run(stop=stop)
         except Exception as error:                     # noqa: BLE001 - reported, not raised
             # A thread that dies silently looks exactly like an overlay that works, so
             # the reason is kept where the window can show it.
@@ -685,33 +808,65 @@ class OverlayController:
             self.log(f"the readout stopped: {error}")
 
     def stop(self) -> str:
+        """Take the overlay down, and never claim to have done it when it has not.
+
+        The handle is only dropped once the thread is really finished. Throwing it away on
+        a timeout is what let a second 開始 build a second overlay over a first one that
+        was still drawing - so a thread that will not finish stays reachable, and
+        :meth:`running` keeps saying so.
+        """
         if not self.running():
             self.message = "未啟動"
             return self.message
         if self.stop_event:
             self.stop_event.set()
         if self.thread:
-            self.thread.join(timeout=10)
+            self.thread.join(timeout=self.STOP_TIMEOUT)
+        if self.thread and self.thread.is_alive():
+            self.message = "停止中…（overlay 還在收尾，稍後再按）"
+            return self.message
         self.thread = None
         self.watch = None
         self.message = "已停止"
         return self.message
 
     # -------------------------------------------------------------------- position
-    def nudge(self, settings: Settings, direction: str, step: int) -> tuple[Settings, str]:
-        """Move the readout one step, and return the settings that say where it now is.
+    def nudge(self, settings: Settings, direction: str, step: int) -> str:
+        """Move the readout one step from where the configuration put it.
 
-        The offset is stored, not just applied: a nudge that vanishes on the next start
-        is a nudge the player has to redo every time.
+        The adjustment is **live and not saved**, and that is the point: 顯示位置 holds the
+        position the player configured, so 重新校正位置 always has an original to return to.
+        Saving the arrows into the offsets - which is what this did first - made that
+        button a no-op, because "the configured position" moved every time an arrow was
+        pressed.
         """
-        offset_x, offset_y = layout.nudged(settings.anchor, settings.offset_x,
-                                           settings.offset_y, direction, step)
-        moved = replace(settings, offset_x=offset_x, offset_y=offset_y)
+        dx, dy = layout.nudged(settings.anchor, self.adjustment[0],
+                               self.adjustment[1], direction, step)
+        moved = (dx, dy)
         if self.watch is not None:
-            note = self.watch.relocate(moved)
-            if note:
-                self.log(note)
-        return moved, f"位移 {offset_x}, {offset_y}"
+            # Through the loop's thread: the window is not ours to move (see
+            # Watch.request_settings). An empty answer means it did not get there in time.
+            note = self.watch.request_settings(settings, moved, timeout=self.REQUEST_TIMEOUT)
+            if not (note or self.watch.presenter.adjustment == moved):
+                return f"位移 {dx}, {dy}（overlay 未即時移動，稍後再試）"
+        self.adjustment = moved
+        return f"位移 {dx}, {dy}"
+
+    def realign(self, settings: Settings) -> tuple[bool, str]:
+        """Put the readout back at the configured position: drop the nudge, re-read it.
+
+        What replaced the old automatic following, in both senses the player needs: a game
+        window that has moved leaves the overlay stranded with no way back, and an arrow
+        adjustment needs a way to be undone. It adopts the form's settings as it goes, so a
+        changed anchor or minimap rectangle takes effect without a restart.
+        """
+        if self.watch is None:
+            return False, "未啟動：開始時就會用這個位置"
+        note = self.watch.request_settings(settings, (0, 0), timeout=self.REQUEST_TIMEOUT)
+        if not note and self.watch.presenter.adjustment != (0, 0):
+            return False, "overlay 沒有回應（可能正在抓資料），稍後再按一次"
+        self.adjustment = (0, 0)
+        return True, note or "已在設定位置"
 
 
 # --------------------------------------------------------------------------- cli

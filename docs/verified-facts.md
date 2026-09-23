@@ -112,6 +112,23 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | **VIPER NORA has no CJK glyphs**, so the Chinese labels cannot be drawn in it - the header and notes would be a row of empty boxes beside boss lines that look perfect. Two faces are kept and each row picks by its content | Recorded live | the render probe drew 個附近 as boxes; the capture shows the Chinese rows in MS Gothic |
 | The readout is right-aligned, so its rows share a right edge with the minimap | Recorded live | the same capture |
 
+### Verified on the game PC, 2026-09-23 (eighth session: 停止, and the position buttons)
+
+Two defects the player found by playing: 停止 did not stop the readout and a second overlay
+appeared on the next 開始, ending in a crash about ten seconds later; and the position
+buttons had no way to put the readout back where it was configured.
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| **停止 leaves no overlay window**: `after 停止: 0 overlay window(s)`, where the same audit before the fix showed the window still there and a second one stacked on it | Recorded live | `docs/evidence/2026-09-23-config-gui-audit-live.txt` |
+| **A second 開始 is still one window** (`after a second 開始: 1 overlay window(s)`), and a final 停止 is zero again - two full cycles, no crash | Recorded live | the same run |
+| The cause was **thread ownership**: the window was created on the settings window's thread and destroyed from the worker, and Windows only lets the creating thread destroy a window. `DestroyWindow` failed silently, the overlay stayed, and the next 開始 built another on top of it while two threads drew into the same device contexts | Implementation fact, confirmed by the report matching the mechanism exactly | `OverlayController._run` builds the presenter on the worker thread now; a test asserts the creating and closing thread names |
+| The **position arrows hung the settings window**, because `SetWindowPos` from the window's thread sends messages to the owning thread and waits - and the owner never pumps a message loop, so it waits forever | Recorded live (found by the audit stopping dead after printing the start line) | the fix is `Watch.request_settings`: the request is queued and the loop carries it out on its own thread between sleep slices |
+| **重新校正位置 returns the readout to the configured position**: nudged to `(1281, 329, …)`, and after the button `(1301, 329, …)` - exactly where 開始 put it | Recorded live | `docs/evidence/2026-09-23-config-gui-audit-live.txt` |
+| The arrows are a **live adjustment, not a setting**, which is what gives that button something to return to; the first attempt saved them into 對齊位移 and made the button a no-op | Recorded live (the audit failed with `did not restore the position`) | `OverlayPresenter.adjustment`; `tests/test_app.py` |
+| The 顯示位置 section and 位置微調 moved to the **top of the window**: they are what the player touches while the game runs, and the form is taller than the screen | Recorded live | `docs/evidence/2026-09-23-settings-window-position.bmp` |
+| The runner now clears a **stuck scheduled task** before triggering it. A run whose process is killed by hand leaves DFB-Interactive marked "running", and the scheduler then ignores every new trigger - which looks exactly like a hung PC from the other end | Recorded live (lost a run to it) | `tools/run_on_pc.sh` |
+
 ### Verified on the game PC, 2026-09-23 (seventh session: styles, one program, no following)
 
 The player's four requests: drop the coordinate whitelist, add per-coordinate colours,

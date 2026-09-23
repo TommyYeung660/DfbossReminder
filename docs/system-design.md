@@ -316,6 +316,50 @@ a GUI is not a thing to verify a fetch with. `main(default_to_config=True)` is s
 entry scripts rather than inferred from "no arguments", because a test that calls
 `main([])` must not open a window on whatever machine runs the suite.
 
+### D22 — The overlay's thread owns the overlay's window
+
+Two player-visible bugs came from one rule that was not being followed, so it is worth
+stating plainly: **every window call for the overlay happens on the thread that created
+it.**
+
+* ``DestroyWindow`` only works from the creating thread. The overlay was built on the
+  settings window's thread and destroyed from the loop's, so 停止 silently failed - the
+  window stayed on screen - and the next 開始 built a second overlay over it while two
+  threads drew into the same device contexts. That is the crash the player reported about
+  ten seconds in.
+* ``SetWindowPos`` from another thread posts messages to the owner and waits for it to
+  process them. The overlay has no message loop (nothing needs one now the hotkeys are
+  gone), so the position arrows **hung the settings window** with the call never returning.
+
+The fix for both is the same shape: the controller's ``start`` runs the whole life of the
+readout - create, draw, destroy - on one worker thread, and reports back through an event
+whether the overlay came up. Anything the window wants done to it (a nudge, a re-anchor)
+is **queued** in ``Watch.request_settings`` and carried out by that thread between its
+sleep slices, with the caller waiting for the answer. The answer matters: when the loop is
+busy fetching, the request times out and the window says the move did not happen rather
+than pretending it did.
+
+### D23 — The position buttons adjust; the settings configure
+
+The first attempt made the arrows write into 對齊位移 x/y and save them. Then 重新校正位置
+- the button the player asked for, "put it back where I configured it" - did **nothing**,
+because the configured position moved with every press: there was no original left to
+return to. The live run reported exactly that: `did not restore the position`.
+
+So the two are separated, and the names now mean what they say:
+
+* **顯示位置** (anchor, 對齊位移, the minimap rectangle) is the configuration. It changes
+  when the player types in it, and it is saved;
+* **位置微調**'s arrows are a **live adjustment** on top of it, held by the presenter and
+  never saved. It is for "the game window moved" and "get this out of the way for a
+  moment", and it lasts exactly as long as the readout does;
+* **重新校正位置** drops the adjustment and re-reads the configuration, which is the one
+  button that answers both "the window moved" and "undo my nudge".
+
+The consequence worth stating: starting the readout again returns it to the configured
+position. That is the same statement as the button, and it is the one that makes the
+configuration the source of truth.
+
 ### D21 — Position is set by hand, not watched
 
 The readout used to re-anchor itself to the client every five seconds. By 2026-09-23 it

@@ -68,6 +68,42 @@ def find_button(widget, text: str):  # noqa: ANN001, ANN201
     return None
 
 
+def overlay_windows() -> list[tuple[int, tuple[int, int, int, int]]]:
+    """Every visible overlay window on this desktop, as (hwnd, rectangle).
+
+    The class name is the overlay's own (``DFBossReminderOverlay<pid>_<n>``), so this
+    counts readout windows and nothing else. It is what turns "停止 does nothing" and "a
+    second overlay appeared" from things a person notices into things this reports - both
+    of which were real, and neither of which any test could have seen.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetClassNameW.restype = ctypes.c_int
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.GetWindowRect.restype = wintypes.BOOL
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+
+    found: list[tuple[int, tuple[int, int, int, int]]] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _lparam):  # noqa: ANN001, ANN202
+        buffer = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(wintypes.HWND(hwnd), buffer, 256)
+        if buffer.value.startswith("DFBossReminderOverlay") and \
+                user32.IsWindowVisible(wintypes.HWND(hwnd)):
+            rect = wintypes.RECT()
+            user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect))  # noqa: B018
+            found.append((int(hwnd), (rect.left, rect.top, rect.right, rect.bottom)))
+        return True
+
+    user32.EnumWindows(visit, 0)
+    return found
+
+
 class RecordingController:
     """Stands in for app.OverlayController: records instead of starting anything."""
 
@@ -116,7 +152,10 @@ def main() -> int:
 
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
+            # Line-buffered on purpose: a run that hangs with its output in a buffer tells
+            # you nothing, and this tool is exactly the kind that gets run to see where it
+            # stops.
+            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
         except (AttributeError, ValueError):        # pragma: no cover
             pass
 
@@ -206,26 +245,80 @@ def main() -> int:
     else:
         print(f"the four arrows nudged: {nudges}")
 
-    root.destroy()
-
     if args.live:
-        # The overlay is up (or the refusal is in the controller's message). Give it time
-        # to fetch and draw, look for its window, and take it down the way 停止 does.
+        # A start/stop/start cycle, because that is the shape of the bug the player hit:
+        # 停止 left the first overlay up, and the next 開始 stacked a second one on it.
         import time
 
         from dfbossreminder.services.window import find_game_window  # noqa: PLC0415
 
+        def report(step: str) -> list:
+            live = overlay_windows()
+            where = live[0][1] if live else None
+            print(f"{step}: {len(live)} overlay window(s)"
+                  + (f", rect {where}" if where else ""))
+            return live
+
         print(f"\ncontroller message: {controller.message}")
-        if "運行中" in controller.message:
+        if "運行中" not in controller.message:
+            problems.append("the overlay did not start - start the game client and run this "
+                            "again")
+        else:
             time.sleep(args.seconds)
-            print(f"after {args.seconds:.0f}s: {controller.message}")
-            print(f"the game window is {'still' if find_game_window() else 'no longer'} "
-                  f"there, and the readout kept drawing")
+            print(f"after {args.seconds:.0f}s: the game window is "
+                  f"{'still' if find_game_window() else 'no longer'} there and the readout "
+                  f"kept drawing")
+            up = report("after 開始")
+            if len(up) != 1:
+                problems.append(f"expected exactly one overlay window, found {len(up)}")
+            first_rect = up[0][1] if up else None
+
+            # Move it away with an arrow, then press 重新校正位置: it has to come back to
+            # exactly where the 顯示位置 settings say. This is the button that replaced the
+            # deleted auto-follow, so it is the one that has to be right.
+            moved_away = False
+            for _ in range(4):
+                button = find_button(root, "→")
+                if button is None:
+                    break
+                button.invoke()
+                time.sleep(0.6)
+            after_nudge = report("after four arrow presses")
+            if first_rect and after_nudge and after_nudge[0][1] != first_rect:
+                moved_away = True
+            if not moved_away:
+                problems.append("the arrow did not move the overlay, so realign cannot be "
+                                "judged")
+
+            realign_button = find_button(root, "重新校正位置")
+            if realign_button is None:
+                problems.append("no 重新校正位置 button in the window")
+            else:
+                realign_button.invoke()
+                time.sleep(1.0)
+                back = report("after 重新校正位置")
+                if first_rect and back and back[0][1] != first_rect:
+                    problems.append(f"重新校正位置 did not restore the position: {first_rect} "
+                                    f"-> {back[0][1]}")
+
             print(f"stopping: {controller.stop()}")
             print(f"stopped, running={controller.running()}")
-        elif "not running" in controller.message:
-            problems.append("the overlay did not start because the game is not running - "
-                            "start the client and run this again")
+            left = report("after 停止")
+            if left:
+                problems.append(f"停止 left {len(left)} overlay window(s) on screen")
+            # And 停止 then 開始 again must still be one window, not two.
+            ok, message = controller.start(settings)
+            print(f"second 開始: {message}")
+            time.sleep(2.0)
+            again = report("after a second 開始")
+            if not ok or len(again) != 1:
+                problems.append(f"a second start left {len(again)} overlay window(s)")
+            print(f"final stop: {controller.stop()}")
+            report("after the final 停止")
+
+    # The window is kept until here: the live block presses its buttons, and a widget of a
+    # destroyed root raises TclError instead of doing anything.
+    root.destroy()
     if captured.getvalue():
         print("\n--- what the run printed ---")
         print(captured.getvalue().strip())

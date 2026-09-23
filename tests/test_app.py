@@ -469,9 +469,12 @@ def presenter_with(fitting: int) -> app.OverlayPresenter:
     presenter.window = type("W", (), {"client": Rect(0, 0, 1280, 720),
                                       "exclusive_fullscreen": False})()
     presenter.notes = []
-    presenter.hotkey_registered = False
     presenter.font_cache = None
     presenter.overlay = StubOverlay(fitting)
+    # Set here because __new__ skipped __init__: the live position adjustment has to exist
+    # before the window can be placed. (A reminder of why the tests that can use the real
+    # constructor do - see the controller tests.)
+    presenter.adjustment = (0, 0)
     return presenter
 
 
@@ -529,34 +532,73 @@ def test_the_controller_refuses_to_start_without_the_game_and_says_why(monkeypat
     assert not controller.running()
 
 
-def test_a_nudge_is_stored_as_well_as_applied() -> None:
-    # A nudge that vanishes on the next start is a nudge the player has to redo.
+def test_a_nudge_is_a_live_adjustment_and_is_never_saved() -> None:
+    # The configured position - what 顯示位置 says - has to stay put, or 重新校正位置 has
+    # nothing to return to. Saving the arrows into the offsets is what made it a no-op.
     controller = StubController()
     settings = parse_settings({"anchor": "top-left", "offset_x": 10, "offset_y": 10})
-    moved, message = controller.nudge(settings, "right", 5)
-    assert (moved.offset_x, moved.offset_y) == (15, 10)
-    assert "15, 10" in message
-    # And the original is untouched: settings are frozen values, not a mutable object
-    # the window and the loop both hold.
-    assert (settings.offset_x, settings.offset_y) == (10, 10)
-
-
-def test_a_nudge_acts_on_a_running_readout_immediately() -> None:
-    controller = StubController()
-    watch_obj, _presenter = watch()
-    controller.watch = watch_obj
-    settings = parse_settings({"anchor": "top-left", "offset_x": 0, "offset_y": 0})
+    message = controller.nudge(settings, "right", 5)
+    assert "5, 0" in message
+    assert controller.adjustment == (5, 0)
+    assert (settings.offset_x, settings.offset_y) == (10, 10), "the settings are untouched"
+    # And realign puts the adjustment back to zero - the configured position wins.
     controller.nudge(settings, "down", 5)
-    assert watch_obj.settings.offset_y == 5      # adopted by the running loop
-    assert watch_obj.relocate(settings) == ""    # the stub presenter cannot move
+    assert controller.adjustment == (5, 5)
+    ok, _message = controller.realign(settings)
+    assert not ok or controller.adjustment == (0, 0)
 
 
-def test_relocate_keeps_the_rest_of_the_settings() -> None:
+def test_a_nudge_asks_the_loops_own_thread_to_move_the_window() -> None:
+    # The window belongs to the loop's thread: SetWindowPos from the settings window's
+    # thread blocks forever, because the owner never pumps a message loop. So the request
+    # is queued and the loop performs it - here it is drained by hand, because the test is
+    # standing in for that loop.
+    import threading
+
+    controller = StubController()
+    controller.REQUEST_TIMEOUT = 0.1
+    watch_obj, presenter = watch()
+    # A loop that is running: some *other* thread owns the window, which is what makes the
+    # request go through the queue instead of being done here.
+    watch_obj.loop_thread = threading.Thread(target=lambda: None, name="pretend-loop")
+    presenter.adjustment = (0, 0)
+    controller.watch = watch_obj
+    settings = parse_settings({"anchor": "top-left", "offset_x": 0, "offset_y": 0,
+                               "radius_blocks": 7})
+    message = controller.nudge(settings, "down", 5)
+    assert watch_obj.settings.radius_blocks == 5, "queued: the loop has not looked yet"
+    assert "未即時移動" in message, "and the window says so rather than pretending"
+    watch_obj._drain_requests()
+    assert watch_obj.settings.radius_blocks == 7, "the loop's thread adopted the settings"
+    # This rig's presenter is the console stub, which has nothing to move - the real one is
+    # covered by test_realign_puts_the_readout_back_at_the_configured_position.
+    assert presenter.draws == []
+
+
+def test_a_request_from_the_same_thread_is_done_at_once() -> None:
+    # A single-threaded caller (a test, or the console loop) has nothing to hand over, so
+    # it must not deadlock waiting for a thread that is itself.
     watch_obj, _presenter = watch()
     fresh = parse_settings({"radius_blocks": 42, "offset_y": 25})
-    watch_obj.relocate(fresh)
+    watch_obj.request_settings(fresh)
     assert watch_obj.settings.radius_blocks == 42
     assert watch_obj.settings.offset_y == 25
+
+
+def test_a_request_that_nobody_answers_says_so_instead_of_hanging() -> None:
+    # Nothing drains the queue here, which is what a fetch in flight looks like.
+    controller = StubController()
+    controller.REQUEST_TIMEOUT = 0.1
+    watch_obj, presenter = watch()
+    presenter.adjustment = (3, 3)
+    controller.watch = watch_obj
+    settings = parse_settings({"anchor": "top-left", "offset_x": 0, "offset_y": 0})
+    watch_obj.request_settings = lambda *a, **k: ""                  # never answered
+    assert "未即時移動" in controller.nudge(settings, "down", 5)
+    ok, message = controller.realign(settings)
+    assert not ok and "沒有回應" in message
+    assert presenter.adjustment == (3, 3), "and the adjustment is left as it was"
+    assert presenter.draws == []
 
 
 def test_the_loop_stops_when_it_is_asked_to_and_closes_its_presenter() -> None:
@@ -573,6 +615,176 @@ def test_the_loop_stops_when_it_is_asked_to_and_closes_its_presenter() -> None:
     thread.join(timeout=5)
     assert not thread.is_alive()
     assert presenter.closed
+
+
+class ThreadRecordingPresenter:
+    """An overlay that remembers which thread made it, drew it and closed it.
+
+    That is the whole point of the test below. The window must be created and destroyed on
+    the same thread, because Windows only lets the creating thread destroy a window: an
+    overlay created on the settings window's thread could not be taken down from the
+    worker, so 停止 appeared to do nothing, the window stayed, and pressing 開始 again put
+    a second overlay on top of it - which is what the player reported, crash included.
+    """
+
+    kind = "overlay"
+
+    def __init__(self) -> None:
+        import threading
+
+        self.created_on = threading.current_thread().name
+        self.closed_on = None
+        self.realigned: list = []
+
+    def draw(self, plan, settings, account, status, stale):  # noqa: ANN001
+        return None
+
+    def describe(self) -> str:
+        return "stub overlay"
+
+    def dump(self, path: str) -> None:
+        return None
+
+    adjustment: tuple[int, int] = (0, 0)
+
+    def reposition(self, settings=None, nudge=None):  # noqa: ANN001
+        self.realigned.append((settings, nudge))
+        if nudge is not None:
+            self.adjustment = tuple(nudge)
+        return "moved to (10, 20)"
+
+    def close(self) -> None:
+        import threading
+
+        self.closed_on = threading.current_thread().name
+
+
+def controller_rig(monkeypatch) -> tuple:  # noqa: ANN001
+    """A real controller whose presenter and network are local, so it can run here.
+
+    The presenter is built **inside** the fake ``make_presenter``, because which thread
+    builds it is the thing under test: a rig that made it first would record the test's own
+    thread and hide the bug it is here to catch.
+    """
+    import threading
+
+    state: dict = {"presenter": None}
+    made: list = []
+
+    def fake_make_presenter(settings, font_cache=None, log=print):  # noqa: ANN001
+        made.append(threading.current_thread().name)
+        state["presenter"] = ThreadRecordingPresenter()
+        return state["presenter"]
+
+    monkeypatch.setattr(app, "make_presenter", fake_make_presenter)
+    monkeypatch.setattr(app, "ProfilerClient", lambda base: FakeClient())
+    controller = app.OverlayController(Path("/nonexistent/settings.json"), log=lambda *_a: None)
+    return controller, state, made
+
+
+def test_the_overlay_is_created_and_destroyed_on_the_worker_thread(monkeypatch) -> None:
+    import threading
+
+    controller, state, made = controller_rig(monkeypatch)
+    caller = threading.current_thread().name
+    ok, message = controller.start(parse_settings({"user_id": "14008279"}))
+    assert ok, message
+    assert made == ["dfboss-overlay"], "the window must be made on the thread that will kill it"
+    presenter = state["presenter"]
+    assert presenter.created_on == "dfboss-overlay" != caller
+
+    assert controller.stop() == "已停止"
+    assert not controller.running()
+    assert presenter.closed_on == "dfboss-overlay", "and destroyed on that same thread"
+
+
+def test_a_second_start_while_running_never_builds_a_second_overlay(monkeypatch) -> None:
+    # The reported bug looked like this: 停止 left the first overlay up, so 開始 stacked a
+    # second one on it. One overlay per controller, whatever the buttons are pressed.
+    controller, _state, made = controller_rig(monkeypatch)
+    assert controller.start(parse_settings({"user_id": "14008279"}))[0]
+    ok, message = controller.start(parse_settings({"user_id": "14008279"}))
+    assert ok and "已經在運行" in message
+    assert made == ["dfboss-overlay"], "only one overlay was ever created"
+    controller.stop()
+
+
+def test_stop_reports_a_thread_that_will_not_finish_instead_of_forgetting_it(monkeypatch) -> None:
+    # Throwing the handle away on a timeout is what allowed the second overlay: 開始 would
+    # then find running() false and build another one over a readout that was still there.
+    import threading
+
+    controller, _state, _made = controller_rig(monkeypatch)
+    stubborn = threading.Event()
+
+    class StubbornWatch:
+        def __init__(self, *args, **kwargs) -> None:      # noqa: ANN002, ANN003
+            pass
+        def run(self, seconds=None, stop=None):  # noqa: ANN001
+            stubborn.wait(timeout=5)          # ignores the stop event on purpose
+        def relocate(self, settings):  # noqa: ANN001
+            return ""
+
+    monkeypatch.setattr(app, "Watch", StubbornWatch)
+    controller.STOP_TIMEOUT = 0.2
+    assert controller.start(parse_settings({"user_id": "14008279"}))[0]
+    message = controller.stop()
+    assert "停止中" in message
+    assert controller.running(), "the handle is kept while the thread is alive"
+    assert controller.start(parse_settings({"user_id": "14008279"}))[1] == "已經在運行"
+    stubborn.set()
+    controller.thread.join(timeout=5)
+
+
+def test_a_start_that_cannot_open_an_overlay_says_so_and_leaves_nothing_running(monkeypatch) -> None:
+    # make_presenter falls back to the console rather than failing, and for a window with a
+    # 開始 button that is the wrong answer to give quietly: the player would press it and
+    # see nothing at all.
+    class ConsolePresenter:
+        kind = "console"
+        def describe(self) -> str:
+            return "console output"
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(app, "make_presenter", lambda *a, **k: ConsolePresenter())
+    controller = app.OverlayController(Path("/nonexistent/settings.json"), log=lambda *_a: None)
+    ok, message = controller.start(parse_settings({"user_id": "14008279"}))
+    assert not ok and "主控台" in message
+    assert not controller.running()
+
+
+def test_a_refused_start_names_the_reason_and_stays_stopped(monkeypatch) -> None:
+    def refuse(*_a, **_k):  # noqa: ANN002, ANN003
+        raise app.GameNotRunning("the Dead Frontier client is not running, so the overlay "
+                                 "was not opened.\nStart the game first.")
+
+    monkeypatch.setattr(app, "make_presenter", refuse)
+    controller = app.OverlayController(Path("/nonexistent/settings.json"), log=lambda *_a: None)
+    ok, message = controller.start(parse_settings({"user_id": "14008279"}))
+    assert not ok and "not running" in message
+    assert not controller.running()
+
+
+def test_realign_puts_the_readout_back_at_the_configured_position(monkeypatch) -> None:
+    # The replacement for the deleted auto-follow: with it gone, a game window that moved
+    # left the overlay stranded, and this is the button that brings it back.
+    controller, state, _made = controller_rig(monkeypatch)
+    fresh = parse_settings({"user_id": "14008279", "anchor": "top-left",
+                            "offset_x": 30, "offset_y": 40})
+    assert controller.realign(fresh) == (False, "未啟動：開始時就會用這個位置")
+    controller.start(fresh)
+    controller.nudge(fresh, "right", 5)
+    controller.watch._drain_requests()
+    assert state["presenter"].adjustment == (5, 0)
+    ok, message = controller.realign(fresh)
+    assert ok and message == "moved to (10, 20)"
+    settings_used, nudge_used = state["presenter"].realigned[-1]
+    assert settings_used is fresh, "the form's settings are what it moves to"
+    assert nudge_used == (0, 0), "and the arrows' adjustment is dropped"
+    assert state["presenter"].adjustment == (0, 0)
+    assert controller.watch.settings.offset_x == 30, "the running loop adopted them"
+    controller.stop()
 
 
 def test_the_last_row_is_never_the_one_that_disappears() -> None:
