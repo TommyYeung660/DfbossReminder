@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from dfbossreminder import app
+from dfbossreminder.domain.geometry import Block
 from dfbossreminder.domain.settings import Settings, parse_settings
 from dfbossreminder.services.window import Rect
 from dfbossreminder.ui.panel import Row
@@ -49,21 +50,17 @@ class FakeClient:
 
 
 class FakePresenter:
+    """A presenter with no window behind it, so the loop can be tested anywhere."""
+
     kind = "console"
 
-    def __init__(self, hot: str | None = None) -> None:
+    def __init__(self) -> None:
         self.draws: list = []
-        self.hot = hot
         self.closed = False
+        self.moves = 0
 
     def draw(self, plan, settings, account, status, stale):  # noqa: ANN001
         self.draws.append({"plan": plan, "account": account, "status": status, "stale": stale})
-
-    def follow(self, window):  # noqa: ANN001
-        return ""
-
-    def hotkey(self):  # noqa: ANN001
-        return self.hot
 
     def describe(self) -> str:
         return "fake"
@@ -78,12 +75,12 @@ class FakePresenter:
 def test_settings_are_remembered_in_a_file_the_tool_reads_back(tmp_path: Path) -> None:
     path = tmp_path / "settings.json"
     app.save_settings(path, parse_settings({"user_id": "14008279", "radius_blocks": 20,
-                                            "whitelist_mode": True, "whitelist": "1055,986:1"}))
+                                            "highlights": "red=1015,999;1020,998"}))
     again = app.load_settings(path)
     assert again.user_id == "14008279"
     assert again.radius_blocks == 20
-    assert again.whitelist_mode
-    assert str(again.whitelist[0].block) == "1055,986"
+    assert again.highlights[0].matches(Block(1015, 999))
+    assert again.highlights[0].rgb == (0xFF, 0x33, 0x33)
 
 
 def test_a_missing_settings_file_means_defaults() -> None:
@@ -110,28 +107,40 @@ def test_a_name_instead_of_an_id_is_refused_with_the_expected_shape() -> None:
     assert "14008279" in str(error.value)
 
 
-def test_the_radius_and_whitelist_are_settable_and_remembered() -> None:
+def test_the_radius_and_the_style_rules_are_settable_and_remembered() -> None:
     args = app.build_parser().parse_args(
-        ["--radius", "25", "--whitelist", "1055,986;1057,1017:2", "--whitelist-mode", "on"])
+        ["--radius", "25", "--highlight", "red=1015,999;1020,998",
+         "--highlight", "#00FF00=1057,1017:2"])
     settings, save = app.apply_overrides(Settings(), args)
     assert settings.radius_blocks == 25
-    assert len(settings.whitelist) == 2
-    assert settings.whitelist_mode
+    assert len(settings.highlights) == 2
+    assert settings.style_colour(Block(1015, 999)) == (0xFF, 0x33, 0x33)
+    assert settings.style_colour(Block(1058, 1017)) == (0x00, 0xFF, 0x00)   # within :2
+    assert settings.style_colour(Block(1, 1)) is None
     assert save
 
 
-def test_whitelist_add_appends_rather_than_replacing() -> None:
-    start = parse_settings({"whitelist": "1055,986"})
-    args = app.build_parser().parse_args(["--whitelist-add", "1057,1017"])
+def test_a_style_rule_adds_to_the_list_and_no_highlights_clears_it() -> None:
+    start = parse_settings({"highlights": "red=1015,999"})
+    args = app.build_parser().parse_args(["--highlight-add", "green=1057,1017"])
     settings, _ = app.apply_overrides(start, args)
-    assert {str(entry.block) for entry in settings.whitelist} == {"1055,986", "1057,1017"}
+    assert len(settings.highlights) == 2
+    cleared, _ = app.apply_overrides(settings, app.build_parser().parse_args(["--no-highlights"]))
+    assert cleared.highlights == ()
 
 
-def test_a_bad_whitelist_on_the_command_line_names_itself() -> None:
-    args = app.build_parser().parse_args(["--whitelist", "nonsense"])
+def test_a_bad_style_rule_on_the_command_line_names_itself() -> None:
+    args = app.build_parser().parse_args(["--highlight", "nonsense"])
     with pytest.raises(SystemExit) as error:
         app.apply_overrides(Settings(), args)
     assert "nonsense" in str(error.value)
+
+
+def test_a_bad_colour_in_a_style_rule_is_refused_rather_than_drawn_white() -> None:
+    args = app.build_parser().parse_args(["--highlight", "chartreuse=1015,999"])
+    with pytest.raises(SystemExit) as error:
+        app.apply_overrides(Settings(), args)
+    assert "chartreuse" in str(error.value)
 
 
 def test_no_save_keeps_a_one_off_run_out_of_the_file() -> None:
@@ -226,19 +235,6 @@ def test_the_fetch_is_gated_by_the_poll_interval() -> None:
     assert client.bossmap_calls == 1
     watch_obj.tick(1000.0 + watch_obj.settings.poll_seconds + 0.1)
     assert client.bossmap_calls == 2
-
-
-def test_the_toggle_hotkey_flips_the_mode_and_saves_it(tmp_path: Path) -> None:
-    path = tmp_path / "settings.json"
-    presenter = FakePresenter(hot="toggle-whitelist")
-    settings = parse_settings({"user_id": "14008279", "whitelist": "1057,1018"})
-    watch_obj, _ = watch(settings=settings, presenter=presenter, path=path)
-    assert not watch_obj.settings.whitelist_mode
-    watch_obj.tick(1000.0)                    # hotkey fires before the draw
-    assert watch_obj.settings.whitelist_mode
-    assert app.load_settings(path).whitelist_mode
-    # And the plan that was drawn used the new mode: only the watched block.
-    assert [row.name for row in presenter.draws[-1]["plan"].rows] == ["Bandits"]
 
 
 def test_a_position_that_is_unknown_is_never_pretended() -> None:
@@ -361,13 +357,33 @@ def test_the_settings_window_reports_a_value_it_had_to_change() -> None:
     assert any(note.startswith("radius_blocks") for note in notes)
 
 
-def test_a_half_typed_whitelist_row_is_dropped_rather_than_saved_as_a_coordinate() -> None:
+def test_a_half_filled_style_row_is_dropped_rather_than_saved() -> None:
+    # A row with no coordinates, or no colour, would be a rule that matches nothing or
+    # draws in a colour nobody chose; both are dropped instead of stored.
     from dfbossreminder.ui.config_gui import payload_from_form
 
-    payload = payload_from_form({"whitelist": [{"x": "1055", "y": "986", "radius": "1"},
-                                               {"x": "", "y": "1000", "radius": "0"}]})
-    assert len(payload["whitelist"]) == 1
-    assert payload["whitelist"][0]["radius"] == 1
+    payload = payload_from_form({"highlights": [
+        {"colour": "red", "cells": "1015,999"},
+        {"colour": "", "cells": "1020,998"},
+        {"colour": "green", "cells": "  "},
+    ]})
+    # The colour is normalised and the cells are parsed on the way out, so the payload is
+    # the same shape the file stores - which is what stops "you typed text, we store
+    # data" being reported to the player as a change the tool made.
+    assert payload["highlights"] == [
+        {"colour": "#FF3333", "cells": [{"x": 1015, "y": 999, "radius": 0, "label": ""}]}]
+
+
+def test_a_style_rule_that_cannot_be_read_keeps_its_text_so_the_difference_shows() -> None:
+    from dfbossreminder.ui.config_gui import normalized, payload_from_form
+
+    payload = payload_from_form({"highlights": [{"colour": "red", "cells": "not a cell"},
+                                                {"colour": "green", "cells": "3,4"}]})
+    settings, notes = normalized(payload)
+    # The whole list is dropped by the parser rather than half-applied, and the note says
+    # so - the window refuses the save before this can matter, but nothing is silent.
+    assert settings.highlights == ()
+    assert any(note.startswith("highlights") for note in notes)
 
 
 # ------------------------------------------------- the settings window's language
@@ -477,6 +493,88 @@ def test_rows_over_the_maximum_height_are_reported_not_dropped_silently() -> Non
     assert kept[-1].colour == parse_settings({}).colour("note")
 
 
+# ------------------------------------------------- start and stop, from the window
+
+
+class StubController(app.OverlayController):
+    """The controller with its presenter and thread taken out.
+
+    Only ``make_presenter`` and the thread are stubbed, so the methods the settings
+    window calls are the real ones - which is the point: the window's 開始 must go
+    through the same "no game, no overlay" check the command line does.
+    """
+
+    def __init__(self, refusal: str = "") -> None:  # noqa: ANN001
+        super().__init__(Path("/nonexistent/settings.json"), log=lambda *_a: None)
+        self.refusal = refusal
+        self.started_with: list = []
+
+    def start(self, settings):  # noqa: ANN001, ANN201
+        if self.refusal:
+            self.message = self.refusal
+            return False, self.refusal
+        self.started_with.append(settings)
+        self.message = "運行中"
+        return True, self.message
+
+
+def test_the_controller_refuses_to_start_without_the_game_and_says_why(monkeypatch) -> None:
+    monkeypatch.setattr(app, "make_presenter", lambda *a, **k: (_ for _ in ()).throw(
+        app.GameNotRunning("the Dead Frontier client is not running, so the overlay was "
+                           "not opened.")))
+    controller = app.OverlayController(Path("/nonexistent/settings.json"), log=lambda *_a: None)
+    ok, message = controller.start(parse_settings({"user_id": "14008279"}))
+    assert not ok
+    assert "not running" in message
+    assert not controller.running()
+
+
+def test_a_nudge_is_stored_as_well_as_applied() -> None:
+    # A nudge that vanishes on the next start is a nudge the player has to redo.
+    controller = StubController()
+    settings = parse_settings({"anchor": "top-left", "offset_x": 10, "offset_y": 10})
+    moved, message = controller.nudge(settings, "right", 5)
+    assert (moved.offset_x, moved.offset_y) == (15, 10)
+    assert "15, 10" in message
+    # And the original is untouched: settings are frozen values, not a mutable object
+    # the window and the loop both hold.
+    assert (settings.offset_x, settings.offset_y) == (10, 10)
+
+
+def test_a_nudge_acts_on_a_running_readout_immediately() -> None:
+    controller = StubController()
+    watch_obj, _presenter = watch()
+    controller.watch = watch_obj
+    settings = parse_settings({"anchor": "top-left", "offset_x": 0, "offset_y": 0})
+    controller.nudge(settings, "down", 5)
+    assert watch_obj.settings.offset_y == 5      # adopted by the running loop
+    assert watch_obj.relocate(settings) == ""    # the stub presenter cannot move
+
+
+def test_relocate_keeps_the_rest_of_the_settings() -> None:
+    watch_obj, _presenter = watch()
+    fresh = parse_settings({"radius_blocks": 42, "offset_y": 25})
+    watch_obj.relocate(fresh)
+    assert watch_obj.settings.radius_blocks == 42
+    assert watch_obj.settings.offset_y == 25
+
+
+def test_the_loop_stops_when_it_is_asked_to_and_closes_its_presenter() -> None:
+    # 停止 has to work while the loop is between fetches, and the window it created has
+    # to go with it: a stopped readout that left its window behind is worse than one that
+    # never started.
+    import threading
+
+    watch_obj, presenter = watch()
+    stop = threading.Event()
+    thread = threading.Thread(target=watch_obj.run, kwargs={"stop": stop}, daemon=True)
+    thread.start()
+    stop.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert presenter.closed
+
+
 def test_the_last_row_is_never_the_one_that_disappears() -> None:
     # The rows at the end are the ones that say whether an empty readout is correct; a
     # trim that lost them would hide the explanation.
@@ -517,65 +615,6 @@ def live_plan():  # noqa: ANN202
     settings = parse_settings({"radius_blocks": 5})
     events = parse_bossmap(BOSS, now=1000.0)
     return build_plan(events, Block(1057, 1017), settings, now=1000.0)
-
-
-def test_constructing_the_presenter_takes_the_toggle_hotkey(monkeypatch) -> None:
-    # This call used to sit after a `return` inside the font method, so the documented F8
-    # toggle was dead code while the ledger called it verified. The presenter is built the
-    # way the tool builds it - not through __new__ - which is what catches that.
-    calls: list[str] = []
-
-    class StubOverlay:
-        def __init__(self, *args, **kwargs) -> None:      # noqa: ANN002, ANN003
-            self.left = self.top = self.height = 0
-
-        def register_hotkey(self, key: str, ident: int = 1) -> bool:
-            calls.append(key)
-            return True
-
-        def set_face(self, face: str) -> None:
-            return None
-
-    window = type("W", (), {"client": Rect(0, 0, 1280, 720), "exclusive_fullscreen": False})()
-    monkeypatch.setattr(app, "Overlay", StubOverlay)
-    monkeypatch.setattr(app, "game_window_or_refuse", lambda log: window)
-    settings = parse_settings({"hotkey": "F6"})
-    # Built the way the tool builds it, settings.hotkey included: the presenter takes the
-    # key as an argument, so a caller that forgets it would silently fall back to F8.
-    presenter = app.OverlayPresenter(settings, True, hotkey=settings.hotkey,
-                                     log=lambda *a: None)
-    assert calls == ["F6"]
-    assert presenter.hotkey_registered is True
-    assert "F6 toggles whitelist mode" in presenter.notes
-
-
-def test_a_hotkey_that_cannot_be_taken_is_reported_not_swallowed(monkeypatch) -> None:
-    class RefusingOverlay:
-        def __init__(self, *args, **kwargs) -> None:      # noqa: ANN002, ANN003
-            self.left = self.top = self.height = 0
-
-        def register_hotkey(self, key: str, ident: int = 1) -> bool:
-            return False
-
-        def set_face(self, face: str) -> None:
-            return None
-
-    window = type("W", (), {"client": Rect(0, 0, 1280, 720), "exclusive_fullscreen": False})()
-    monkeypatch.setattr(app, "Overlay", RefusingOverlay)
-    monkeypatch.setattr(app, "game_window_or_refuse", lambda log: window)
-    presenter = app.OverlayPresenter(parse_settings({}), True, log=lambda *a: None)
-    assert presenter.hotkey_registered is False
-    assert "could NOT register F8 as a hotkey" in presenter.notes
-
-
-def test_the_hotkey_is_configurable_because_f8_is_not_always_free() -> None:
-    # On the game PC something else already holds F8, and a toggle that cannot register
-    # is a toggle that does not exist.
-    assert parse_settings({}).hotkey == "F8"
-    assert parse_settings({"hotkey": "f6"}).hotkey == "F6"
-    args = app.build_parser().parse_args(["--hotkey", "F6"])
-    settings, save = app.apply_overrides(Settings(), args)
-    assert settings.hotkey == "F6" and save
 
 
 # --------------------------------------------- the console's encoding

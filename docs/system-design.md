@@ -16,18 +16,32 @@ Then, after the first live run:
 > 2. 程序要有獨立配置界面去做白名單以及overlay字體大小/顏色配置
 > 3. 如果遊戲主程序沒開, overlay 不允許開啟
 
+Then, 2026-09-23:
+
+> 1. 刪除座標白名單功能
+> 2. 加入座標個性化樣式功能, 例如我想做到, 1015, 999和1020,998 在有boss 時顯示紅色字
+> 3. 合併config 和Reminder, 打開config 後, 按開始鍵就打開overlay
+> 4. 刪除auto move with client 功能(現在也不work, ssh 去debug), 然後變為在config 接調整位置鍵
+
 Read as engineering statements:
 
 * **R1** — an account id in the `14008279` form is entered once and remembered.
 * **R2** — using the player's live coordinates, show the bosses within a
   configurable radius of them.
-* **R3** — a whitelist mode: when it is on, only bosses at whitelisted
-  coordinates are shown.
+* **R3** — ~~a whitelist mode~~ **replaced by R7**: coordinate *styles*, where a boss at
+  a named coordinate is drawn in a colour the player chooses. The filter is gone; the
+  radius is the only thing that decides which rows exist.
 * **R4** — an in-client overlay under the region minimap, bright green, ~12 px, in a
   fixed line format, with a second format for big/ultra bosses that shows the end
   time instead of a bearing.
-* **R5** — a settings window for the whitelist, the font size and the colours.
+* **R5** — a settings window for the style rules, the font size and the colours; since
+  R9 it is also how the overlay is started.
 * **R6** — no game running, no overlay.
+* **R7** — coordinate styles: `1015,999` and `1020,998` are shown in red when a boss is
+  there. A style changes a row's colour, never whether the row is there.
+* **R8** — no automatic re-anchoring. The readout stopped following the game window; its
+  position is set by the player, from buttons in the settings window.
+* **R9** — one program: opening the config and pressing 開始 opens the overlay.
 
 ## 2. The facts this design turns on
 
@@ -109,18 +123,21 @@ The player's block and the bosses' blocks both come from `dfprofiler.com`, in th
 game's map grid. `services/profiler.py` fetches; `domain/` does all the arithmetic.
 R1's remembered id is what makes the player side possible at all.
 
-### D3 — The radius and the whitelist both live in the plan, as pure rules
+### D3 — The radius is the only filter, and it lives in the plan
 
 `domain/plan.py` is a pure function of `(events, player, settings, now)`. The radius
 test uses the **block** count (`chebyshev`), because that is how a player walks, and
 the ordering uses the straight-line distance only to break ties between cells that
 are equally many blocks away, so the order never contradicts the count a row prints.
 
-**In whitelist mode the whitelist is the filter, and the radius does not apply.** A
-watched coordinate is reported wherever the player is — that is the whole point of
-watching one — and combining the two filters would make whitelist mode mostly
-useless. Whitelist mode with an empty list shows nothing and says so, rather than
-falling back to showing everything, which would be the opposite of the mode.
+There used to be a second filter — the whitelist — and it was removed on 2026-09-23
+([[D19→D19 — A style is a colour, not a filter]], which replaced it with colours). Worth
+recording what it did well, because it is the reason the replacement is shaped as it is:
+in whitelist mode the whitelist **was** the filter and the radius did not apply, so a
+watched coordinate was reported wherever the player was. That is a genuinely different
+question from "what is near me", and mixing the two would have made either one useless.
+Nothing in the plan asks that question now; the styles ask "how should this row look",
+which is a question about a row that already exists.
 
 ### D4 — Fail closed, and never invent a value
 
@@ -164,18 +181,26 @@ follows the name, so the coordinate and the third field can never be the fields 
 disappear. A test asserts that every row drawn at the shipped size fits the shipped
 width.
 
-### D9 — The settings window is its own program
+### D9 — The settings window is a window, and (since D20) the program's face
 
-``--config`` opens a tkinter window; ``DFBossReminderConfig.exe`` is built
-``--windowed`` so it opens from a shortcut with no console behind it. It is
-deliberately independent of the overlay: it needs no game, no network, and it never
-creates a window over the client. The value-building and validation are plain
-functions, so "load, show, save" round-trips are tested without a display, and a value
-the tool had to change is *reported* rather than silently stored.
+``--config`` opens a tkinter window, and the tools it needs are injected rather than
+imported: ``load``, ``save`` and a ``controller`` that can start, stop and nudge the
+readout. With no controller the window is still a working settings editor, which is what
+a machine with no game uses. The value-building and validation are plain functions, so
+"load, show, save" round-trips are tested without a display, and a value the tool had to
+change is *reported* rather than silently stored.
 
-tkinter rather than a packaged toolkit: it is in the standard library, so it keeps
-the project's zero runtime dependencies and the PyInstaller build small, and a
-settings form does not need more.
+It builds itself **withdrawn** when asked (``visible=False``), which is how
+``tools/pc/audit-config-gui.py`` checks the widget tree on the game PC. That parameter
+exists because of a mistake worth keeping: a pytest file that *opened* the window to
+inspect it put a dozen settings windows on the developer's screen while the suite ran.
+Checking a window is worth doing; interrupting whoever is sitting at the machine is not,
+and the machine that matters is the Windows one anyway.
+
+tkinter rather than a packaged toolkit: it is in the standard library, so it keeps the
+project's zero runtime dependencies and the PyInstaller build small, and a settings form
+does not need more. (The second ``--windowed`` exe it used to be built into is gone —
+one program, one exe, see D20.)
 
 ### D11 — A transparent surface needs its glyph pixels made opaque
 
@@ -249,6 +274,65 @@ This is the general shape of a Windows-only cosmetic setting: the request, the
 recorded value and the drawn pixels are three different things, and only the third is
 what the player sees.
 
+### D19 — A style is a colour, not a filter
+
+The third requirement was a **whitelist**: only bosses at coordinates the player named
+were shown. On 2026-09-23 the player dropped it and asked for the same coordinate idea
+applied to *appearance* - "1015,999 and 1020,998, when there is a boss, show it in red".
+
+The distinction is the whole design. A filter decides **which rows exist**, so a rule for
+one corner of the map silently hides the rest of it, and an empty readout cannot be told
+apart from a rule that matched nothing. A style decides **how a matching row is drawn**,
+and every boss keeps its place in the list - so the answer to "why is it not red?" is
+"no boss is standing there", which the console states outright (`座標樣式 N 組，命中 M 列`).
+
+What moved and what stayed: `domain/whitelist.py` became `domain/coordinates.py` (the
+cells, the radius and their parsing were never the problem), `domain/styles.py` added the
+rule itself, and everything that existed to *filter* - the mode, the suppression counter,
+the `[白名單]` marker, `allows_any`, the plan's whitelist branch - was deleted rather than
+left dormant. The rule's first match wins, because rule order is visible in the settings
+window and a precedence rule that is invisible while editing is worse than a plain one.
+
+### D20 — One program, so there is one thing to start
+
+The tool had two exes: the readout and a separate settings window. The player asked for
+them merged, with a start button - and the earlier session had already shown why: they
+could not find the config exe on the Desktop, and a tool whose entry point is unclear is
+a tool that is not running.
+
+So the settings window is now the program's face. With no arguments it opens; 開始 runs
+the overlay **in the same process, in a thread**; 停止 (or closing the window) takes it
+down. The reasons for in-process rather than spawning a child:
+
+* 停止 actually stops it, immediately, with no second process to lose track of;
+* a position nudge reaches the running overlay at once, because the controller and the
+  loop hold the same objects;
+* the old two-exe arrangement is what produced the orphaned windows and stale builds that
+  cost time in the sessions before this one.
+
+What did **not** merge: the command line. `--once`, `--presentation`, `--highlight` and
+the console presentation are unchanged, and they are what the probes and the runbook use -
+a GUI is not a thing to verify a fetch with. `main(default_to_config=True)` is set by the
+entry scripts rather than inferred from "no arguments", because a test that calls
+`main([])` must not open a window on whatever machine runs the suite.
+
+### D21 — Position is set by hand, not watched
+
+The readout used to re-anchor itself to the client every five seconds. By 2026-09-23 it
+was not working, and the player asked for it to go - replaced by position buttons. Both
+halves of that are worth keeping:
+
+* **the feature was worse than it looked.** Re-anchoring moved the list under the player
+  while they were reading it, and it could not be switched off;
+* **a nudge must be visible.** The arrows act on a running overlay immediately and are
+  stored in the offsets, so the position is aimed by looking at the game - which is how
+  anyone would place it anyway. The offset is an *inward* inset, so which way it moves
+  depends on the corner; `layout.nudged` works that out so an arrow always means "move
+  the readout that way", and a test pins the sign for every anchor.
+
+Follow's removal took `watch_pid_seconds` with it: a setting that exists only for a
+feature that is gone is a setting that lies about what the tool does.
+
 ### D17 — The overlay is the answer; the console is the explanation
 
 The window over the game now draws **only the boss rows**: no header, no waypoint, no
@@ -299,14 +383,21 @@ bug, so the worst possible thing to lose silently. The window now sizes itself t
 it has to show, up to the configured height as a maximum, and anything still over that
 limit appears as a final line saying how many lines were hidden.
 
-### D13 — The toggle key is a setting
+### D13 — There is no hotkey any more, and that is the point
 
-The whitelist toggle needs a global hotkey, and a hotkey another application already
-holds cannot be registered — the toggle then does not exist for the player. On the
-game PC the first attempts failed, which turned out to be two of this project's own
-overlays competing rather than a conflict with another program; F8 is in fact free
-there and only F12 is taken. The key is configurable anyway, and
-`tools/pc/probe-hotkeys.py` answers "which are free" for any machine.
+The one global hotkey this project ever had toggled whitelist mode. When the whitelist
+was replaced by coordinate styles (D19) it had nothing left to toggle, so the whole
+apparatus went: `RegisterHotKey`/`PeekMessage`, the key table, `--hotkey`, the setting,
+`tools/pc/probe-hotkeys.py`, and the Windows message pump that only hotkeys wanted.
+
+It is worth recording what it taught while it existed, because it is why its removal was
+easy to justify: a hotkey another application holds cannot be registered, and the toggle
+then simply does not exist for the player — a failure that had already been misread once
+as a conflict when it was two of this project's own overlays competing. A control that
+can silently not exist, for a feature that no longer exists, is not worth its code.
+
+Start, stop and position are buttons in the settings window now. Nothing in the tool
+registers a hotkey, pumps a message, or reacts to input at all.
 
 ### D10 — No game, no overlay
 

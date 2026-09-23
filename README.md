@@ -92,17 +92,26 @@ is where you add your own.
 2. **Shows the bosses within a radius of your live position**, nearest first, with
    the blocks between you and them. The radius is a setting (`--radius`), changeable
    at any time.
-3. **Whitelist mode.** Turn it on and only bosses at coordinates you list are
-   shown, wherever you are on the map. `1055,986` watches one cell,
-   `1055,986:2` watches that cell and everything within two blocks of it.
+3. **Coordinate styles.** Name coordinates and the colour they should be drawn in, and
+   a boss standing there is shown in that colour: `red=1015,999;1020,998` paints both
+   cells red, `yellow=1057,1017:2` paints a cell and its eight neighbours. A style only
+   changes the colour — nothing is hidden — and the first matching rule wins. Written in
+   the settings window, or `--highlight "red=1015,999;1020,998"` on the command line.
 4. **Draws it inside the game**, under the region minimap, as a layered
    click-through window that never takes focus (`--presentation overlay`), or outside
    the client (`--presentation panel`), or in the console.
-5. **Opens its own settings window** (`--config`): the whitelist as a table, the font
-   size, the colours, the placement and the big-boss names — every label in Traditional
-   Chinese, and the buttons stay put at the bottom while the form scrolls. It needs no
-   game, no overlay and no network: it is how the account id gets set in the first place.
-6. **Refuses to draw without the game.** The readout is a readout *of the running
+5. **Is one program.** With no arguments it opens its settings window — the account id,
+   the style rules, the font size, the colours, the placement and the big-boss names,
+   every label in Traditional Chinese — and **開始** in that window runs the overlay in
+   the same process, with **停止** (or closing the window) taking it down again. The font
+   and the form scroll while the buttons stay put. It needs no game, no overlay and no
+   network to open: it is how the account id gets set in the first place.
+6. **Where it sits is yours to set.** The readout no longer follows the game window
+   (asking for that was the player's fourth request: it moved the list under them while
+   they were reading it) — the arrows in the settings window move it a step at a time,
+   the step size is a box next to them, and the move is immediate while the overlay is
+   up. `--anchor` and `--offset` do the same from a command line.
+7. **Refuses to draw without the game.** The readout is a readout *of the running
    client*, placed against its client area and measured from its player, so with the
    client closed the overlay is not opened at all and the reason is printed. The
    console presentation is unaffected, which is how the tool is checked before a game
@@ -118,7 +127,7 @@ cannot be compared with a map coordinate at all. See `docs/system-design.md` D2.
 
 | Piece | State |
 | --- | --- |
-| Domain (blocks, boss map parsing, whitelist, settings, plan) | **194 tests pass** on the development machine |
+| Domain (blocks, boss map parsing, coordinates and styles, settings, plan) | **235 tests pass** on the development machine |
 | Profiler client (boss map, profile `gpscoords`) | **Verified live** against `dfprofiler.com` |
 | Console presentation, polling loop, settings persistence, `--once`, `--json` | **Verified live** on the game PC |
 | The overlay window and the client-rectangle locator | **Verified live on the game PC, 2026-09-22**: it appears over the client area, clicks pass through, and it does not take focus |
@@ -126,6 +135,8 @@ cannot be compared with a map coordinate at all. See `docs/system-design.md` D2.
 | The refusal when the game is not running | **Unit-tested, not verified live** — the client was running during every session and closing it would have cost the player their game |
 | The transparent 10 px readout, the Chinese labels and the content-sized window | **Verified live on the game PC, 2026-09-22** — see `docs/evidence/2026-09-22-overlay-transparent-on-client.png` |
 | The client's own HUD font, extracted from its assets and loaded privately, and the right alignment | **Verified live on the game PC, 2026-09-22** — see `docs/evidence/2026-09-22-overlay-game-font-on-client.png` |
+| The overlay as a bare boss list (no header, notes or age) and the font weight measurement | **Verified live on the game PC, 2026-09-23** — see `docs/evidence/2026-09-23-overlay-bosses-only-on-client.png` |
+| Coordinate styles drawing a matching boss in its own colour, and the settings window driving the overlay | **Verified live on the game PC, 2026-09-23** — see `docs/evidence/2026-09-23-styles-red-yellow-surface.png` and `…-config-gui-audit-live.txt` |
 
 The live Windows runs found seven defects no test on the development machine could
 see (blank CJK glyphs, a truncated minutes column, a font lookup bound to the wrong
@@ -153,7 +164,8 @@ The first run with `--user-id` saves it, so every run after that is just:
 uv run dfboss
 ```
 
-To set the whitelist, the font size and the colours by clicking rather than typing:
+To set the style rules, the font size and the colours by clicking rather than typing
+(and to start the overlay from the same window):
 
 ```sh
 uv run dfboss --config
@@ -165,8 +177,11 @@ uv run dfboss --config
 # one look, no window - prints the plan and exits
 uv run dfboss --once --json plan.json
 
-# watch a watchlist instead of a radius
-uv run dfboss --whitelist "1055,986:2=Bunker;1057,1017" --whitelist-mode on
+# show a named coordinate in red: the boss is still listed, just painted
+uv run dfboss --highlight "red=1015,999;1020,998" --highlight "yellow=1057,1017:2"
+
+# drop every style rule again
+uv run dfboss --once --no-highlights
 
 # what is set right now
 uv run dfboss --show-config
@@ -181,20 +196,22 @@ uv run dfboss --anchor top-left --width 430 --font-size 14 --align left
 uv run dfboss --align left --no-game-font
 ```
 
-While it runs, **`F8` toggles whitelist mode** and remembers it. The toggle needs
-the overlay window, so it is available in `overlay` and `panel` mode, not in the
-console; `--hotkey` changes the key (F1–F12, Insert, Home, End), and
-`tools/pc/probe-hotkeys.py` reports which are free on a machine.
+There is no in-game hotkey any more: the only one there ever was toggled whitelist
+mode, and the whitelist is gone (the coordinate styles replaced it). Start, stop and
+position all live in the settings window, which is what a double-click opens.
 
 ## How it reads
 
 Read-only, always:
 
 * it makes `GET` requests to `dfprofiler.com` — the boss map and one profile;
-* it measures the game window's client rectangle to place the overlay;
+* it measures the game window's client rectangle to place the overlay, once, at start -
+  it does not keep watching it;
 * it never injects into the client, never reads or writes game memory, never sends
-  keyboard or mouse input, and never posts anything anywhere. The `F8` hotkey is
-  the OS handing a key *you* pressed to its own window.
+  keyboard or mouse input to anything, and never posts anything anywhere. There is no
+  hotkey and no injected input at all since 2026-09-23: the overlay is a window that
+  draws itself and takes no input, and the only controls are the buttons in its own
+  settings window.
 
 The same boundary as the sibling project, for the same reason: a tool that only
 reads cannot change your account's gameplay, and the rules question stays a rules

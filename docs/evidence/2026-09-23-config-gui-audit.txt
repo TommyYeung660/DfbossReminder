@@ -1,0 +1,14 @@
+DFB interactive run 23/09/2026 ¶g¤T 11:48:22.18
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1790135302-24306
+the window was built withdrawn; viewable=False
+100 labels, 0 starts recorded so far
+style rows rendered: 2 (2 rules configured)
+é–‹å§‹ passed 2 style rules to the controller, user_id='14008279'
+the four arrows nudged: [('right', 5), ('left', 5), ('down', 5), ('up', 5)]
+
+PASS: the window has the styles table, the start button and the position arrows, and nothing of the whitelist
+EXITCODE=0
+
+EXITCODE=0

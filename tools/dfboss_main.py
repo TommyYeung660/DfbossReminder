@@ -5,7 +5,12 @@ build names. It puts the project's ``src`` on ``sys.path`` first, which makes th
 file work whether it is frozen (``src`` is beside it in the bundle) or run straight
 from a checkout.
 
+It is also the only entry point the player uses: with no arguments it opens the
+settings window, which is where the overlay is started from. Anything on the command
+line is the diagnostic path.
+
 Usage:
+    py tools\\dfboss_main.py                 (double-click: the settings window)
     py tools\\dfboss_main.py --once
     py -m PyInstaller --onefile --paths src tools\\dfboss_main.py
 """
@@ -23,4 +28,6 @@ if SRC_ROOT.is_dir() and str(SRC_ROOT) not in sys.path:
 from dfbossreminder.app import main  # noqa: E402 - after the path fix, on purpose
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # ``default_to_config``: a bare double-click opens the settings window rather than
+    # printing a usage error, and the window can start the overlay itself.
+    raise SystemExit(main(default_to_config=True))

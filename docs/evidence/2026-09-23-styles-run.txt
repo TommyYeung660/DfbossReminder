@@ -1,0 +1,11 @@
+DFB interactive run 23/09/2026 ¶g¤T 11:48:48.10
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1790135327-24923
+settings saved to C:\Users\tommy.yeung\.dfbossreminder\settings.json
+DFBossReminder 0.1.0 - overlay visible=True at (1246,359)-(1586,779); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
+fetched 15 boss events; player 1057,1017
+overlay surface written to C:\DFTools\DfbossReminder\tools\pc\evidence\overlay.bmp; overlay visible=True at (1246,359)-(1586,453); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
+EXITCODE=0
+
+EXITCODE=0

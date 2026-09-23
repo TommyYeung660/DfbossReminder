@@ -34,10 +34,8 @@ NOTE_TEXT: dict[str, tuple[str, str]] = {
     "within": ("{radius} 格內", "within {radius} blocks"),
     "beyond": ("半徑外 {count} 個", "{count} beyond the radius"),
     "no_player": ("沒有玩家位置", "no player position"),
-    "whitelist": ("白名單 {entries} 筆，過濾 {suppressed} 個",
-                  "whitelist on ({entries} entries, {suppressed} suppressed)"),
-    "whitelist_empty": ("白名單模式開啟但清單是空的",
-                        "whitelist mode is on but the whitelist is empty"),
+    "styles": ("座標樣式 {rules} 組，命中 {matched} 列",
+               "{rules} coordinate style(s), {matched} rows matched"),
     "missions": ("包含任務", "missions included"),
     "capped": ("還有 {count} 個未顯示", "{count} more not shown"),
 }
@@ -139,8 +137,6 @@ def title_line(plan: Plan, settings: Settings, account: str = "") -> str:
     where = str(plan.player) if plan.player else ("位置不明" if language != "en" else "at ?")
     count = (f"{plan.nearby_sightings} 個附近" if language != "en"
              else f"{plan.nearby_sightings} nearby")
-    if settings.whitelist_mode:
-        count += "  [白名單]" if language != "en" else "  [whitelist]"
     for candidate in (f"DFBossReminder  {account}  {where}  {count}" if account else "",
                       f"DFBossReminder  {where}  {count}",
                       f"DFBossReminder  {where}",
@@ -181,7 +177,10 @@ def rows_for(plan: Plan, settings: Settings, status: str = "", stale: bool = Fal
     """
     rows: list[Row] = []
     for boss in plan.rows:
-        colour = settings.colour("big") if boss.is_big else settings.colour("list")
+        # A coordinate style wins over the tier colour: a colour the player set by hand
+        # for a specific cell is a stronger statement than "this is a big boss".
+        colour = (settings.style_colour(boss.block)
+                  or (settings.colour("big") if boss.is_big else settings.colour("list")))
         rows.append(Row(boss_line(settings, boss), colour))
     if not extras:
         return tuple(rows)

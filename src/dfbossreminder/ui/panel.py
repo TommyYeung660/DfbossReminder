@@ -60,14 +60,6 @@ DT_SINGLELINE = 0x00000020
 DT_NOPREFIX = 0x00000800
 DT_END_ELLIPSIS = 0x00008000
 
-# Global hotkeys. The player presses the key; this process never sends input to the
-# game, and a registered hotkey is the OS delivering a message to our own window.
-WM_HOTKEY = 0x0312
-MOD_NOREPEAT = 0x4000
-PM_REMOVE = 0x0001
-VK = {f"F{n}": 0x6F + n for n in range(1, 13)}
-VK.update({"INSERT": 0x2D, "HOME": 0x24, "END": 0x23})
-
 # The game's HUD is drawn light-on-dark, so the readout keeps the same contrast.
 # The readout mixes ASCII with the zh bearing words, so the font must have both and
 # must be fixed-pitch or the columns drift. Consolas has no CJK glyphs at all: with
@@ -221,13 +213,6 @@ def _bind():  # noqa: ANN202 - ctypes handles
     gdi32.RemoveFontResourceExW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
     gdi32.RemoveFontResourceExW.restype = wintypes.BOOL
 
-    user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
-    user32.RegisterHotKey.restype = wintypes.BOOL
-    user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
-    user32.UnregisterHotKey.restype = wintypes.BOOL
-    user32.PeekMessageW.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.UINT,
-                                    wintypes.UINT]
-    user32.PeekMessageW.restype = wintypes.BOOL
     return user32, gdi32
 
 
@@ -235,6 +220,42 @@ def _rgb(colour: tuple[int, int, int]) -> int:
     """GDI wants ``0x00BBGGRR``, not the ``R, G, B`` this project passes around."""
     red, green, blue = colour
     return (red & 0xFF) | ((green & 0xFF) << 8) | ((blue & 0xFF) << 16)
+
+
+def composite_bmp_rows(raw: bytes, width: int, height: int,
+                       backdrop: tuple[int, int, int] = (96, 96, 96)) -> bytes:
+    """The DIB's pixels as 24-bit BMP rows, composited over ``backdrop``.
+
+    Pure byte arithmetic, so the one thing that can go wrong silently can be tested on a
+    machine with no GDI: the **channel order**. The surface is BGRA and a 24-bit BMP is
+    BGR, so the bytes pass through in order - writing them as RGB instead swaps red and
+    blue, which is invisible for as long as every colour in use has R equal to B. Every
+    green readout this project produced hid it, and the first red style rule showed the
+    rows as blue.
+
+    BMP rows run bottom-up and are padded to a four-byte boundary.
+    """
+    row_size = ((width * 3 + 3) // 4) * 4
+    pixels = bytearray()
+    for y in range(height - 1, -1, -1):
+        start = y * width * 4
+        row = bytearray()
+        for x in range(width):
+            offset = start + x * 4
+            blue, green, red, alpha = raw[offset:offset + 4]
+            if alpha == 255:
+                row += bytes((blue, green, red))
+            else:
+                # Premultiplied BGRA, so the stored channels are already the source terms.
+                # Clamped: a diagnostic must not be able to fail on a pixel.
+                inverse = 255 - alpha
+                row += bytes((
+                    min(255, blue + backdrop[2] * inverse // 255),
+                    min(255, green + backdrop[1] * inverse // 255),
+                    min(255, red + backdrop[0] * inverse // 255)))
+        row += bytes(row_size - len(row))
+        pixels += row
+    return bytes(pixels)
 
 
 class Overlay:
@@ -682,34 +703,6 @@ class Overlay:
         if not ok:
             raise OSError(f"UpdateLayeredWindow failed: {ctypes.get_last_error()}")
 
-    # ------------------------------------------------------------------ hotkeys
-    def register_hotkey(self, key: str, ident: int = 1) -> bool:
-        """Claim a global key, so the player can toggle something without a console.
-
-        The OS delivers the press as a message to this window; the game never sees
-        it and this process sends nothing. ``MOD_NOREPEAT`` stops a held key from
-        toggling hundreds of times.
-        """
-        name = (key or "").strip().upper()
-        if name not in VK:
-            return False
-        return bool(self.user32.RegisterHotKey(wintypes.HWND(self.hwnd), ident,
-                                               MOD_NOREPEAT, VK[name]))
-
-    def hotkey_pressed(self, ident: int = 1) -> bool:
-        """True once per press. Drains the queue so a double press is seen as one."""
-        message = wintypes.MSG()
-        pressed = False
-        while self.user32.PeekMessageW(ctypes.byref(message), wintypes.HWND(self.hwnd),
-                                       0, 0, PM_REMOVE):
-            if message.message == WM_HOTKEY and message.wParam == ident:
-                pressed = True
-        return pressed
-
-    def unregister_hotkey(self, ident: int = 1) -> None:
-        if self.hwnd:
-            self.user32.UnregisterHotKey(wintypes.HWND(self.hwnd), ident)
-
     # ------------------------------------------------------------------ teardown
     def describe(self) -> str:
         """Whether the window is on screen and where, read back from Windows.
@@ -750,31 +743,12 @@ class Overlay:
         the game is what actually shows the transparency.
         """
         raw = ctypes.string_at(self.bits, self.width * self.height * 4)
-        row_size = ((self.width * 3 + 3) // 4) * 4
-        pixels = bytearray()
-        for y in range(self.height - 1, -1, -1):        # BMP rows run bottom-up
-            start = y * self.width * 4
-            row = bytearray()
-            for x in range(self.width):
-                offset = start + x * 4
-                blue, green, red, alpha = raw[offset:offset + 4]
-                if alpha == 255:
-                    row += bytes((red, green, blue))
-                else:
-                    # Premultiplied BGRA, so the source terms are the stored channels.
-                    # Clamped: a diagnostic must not be able to fail on a pixel.
-                    inverse = 255 - alpha
-                    row += bytes((
-                        min(255, red + backdrop[0] * inverse // 255),
-                        min(255, green + backdrop[1] * inverse // 255),
-                        min(255, blue + backdrop[2] * inverse // 255)))
-            row += bytes(row_size - len(row))
-            pixels += row
+        pixels = composite_bmp_rows(raw, self.width, self.height, backdrop)
         header = struct.pack("<2sIHHI", b"BM", 14 + 40 + len(pixels), 0, 0, 14 + 40)
         info = struct.pack("<IiiHHIIiiII", 40, self.width, self.height, 1, 24, 0,
                            len(pixels), 2835, 2835, 0, 0)
         with open(path, "wb") as handle:
-            handle.write(header + info + bytes(pixels))
+            handle.write(header + info + pixels)
         return path
 
     def close(self) -> None:

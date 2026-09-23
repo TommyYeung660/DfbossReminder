@@ -2,9 +2,9 @@
 
 This is the whole of the tool's decision-making, and it is a pure function of
 (boss events, player block, settings, now). Nothing here draws, fetches, or reads
-the clock, so the rules the player sees - "within N blocks", "only on the
-whitelist", "nearest first", "very close is emphasised" - are tested without a
-game, a network, or Windows.
+the clock, so the rules the player sees - "within N blocks", "nearest first",
+"big bosses first", "capped at N" - are tested without a game, a network, or
+Windows.
 
 The plan also says *why* it looks the way it does in ``notes``, because a bare
 list of rows cannot be told apart from a broken one. "no player position" and
@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from .bosses import TIER_NORMAL, Sighting, expand, strip_count, tier_of
 from .geometry import Bearing, Block, euclidean
 from .settings import Settings
-from .whitelist import allows_any
 
 NO_PLAYER = "no_player"
 
@@ -57,7 +56,6 @@ class BossRow:
     distance: int | None
     bearing: Bearing | None
     minutes_left: float
-    whitelisted: bool
     tier: str = TIER_NORMAL
     end_epoch: float = 0.0
 
@@ -104,7 +102,6 @@ class Plan:
     total_sightings: int
     nearby_sightings: int
     shown: int
-    suppressed_by_whitelist: int
     beyond_radius: int
 
     @property
@@ -115,7 +112,6 @@ class Plan:
 def _row(
     sighting: Sighting,
     player: Block | None,
-    whitelisted: bool,
     now: float,
     big_bosses: tuple[str, ...],
 ) -> BossRow:
@@ -128,7 +124,6 @@ def _row(
         distance=bearing.blocks if bearing else None,
         bearing=bearing,
         minutes_left=sighting.event.minutes_left(now),
-        whitelisted=whitelisted,
         tier=tier_of(sighting.name, big_bosses),
         end_epoch=sighting.event.end,
     )
@@ -140,38 +135,23 @@ def build_plan(
     settings: Settings,
     now: float,
 ) -> Plan:
-    """Decide the rows, applying the whitelist first and otherwise the radius.
+    """Decide the rows: everything within the radius, nearest first.
 
-    In whitelist mode the whitelist *is* the filter: a watched coordinate is
-    reported wherever the player is, which is the whole point of watching one. The
-    radius only applies in the normal mode, where the question is "what is near me".
+    There is no filter any more. The player's third requirement started as a whitelist
+    that *hid* everything else; on 2026-09-23 they replaced it with coordinate styles,
+    which colour a matching boss instead of removing the rest. So the only question here
+    is the radius one - "what is near me" - and ``settings.highlights`` never changes
+    which rows exist, only how the view draws them.
     """
     sightings = expand(events)
     notes: list[Note] = []
 
-    whitelisted_only = settings.whitelist_mode
-    if whitelisted_only and not settings.whitelist:
-        # Whitelist mode with nothing on the list means nothing can match. Showing
-        # everything instead would be the opposite of what the mode is for, so this
-        # stays empty and says why.
-        notes.append(Note("whitelist_empty"))
-
-    suppressed = 0
     beyond = 0
-    considered: list[BossRow] = []
-    for sighting in sightings:
-        if whitelisted_only and not allows_any(settings.whitelist, (sighting.block,)):
-            suppressed += 1
-            continue
-        considered.append(_row(sighting, player, whitelisted_only, now, settings.big_bosses))
+    considered: list[BossRow] = [
+        _row(sighting, player, now, settings.big_bosses) for sighting in sightings
+    ]
 
-    if whitelisted_only:
-        chosen = considered if settings.whitelist else []
-        notes.append(Note("whitelist", (("entries", len(settings.whitelist)),
-                                       ("suppressed", suppressed))))
-        if player is None:
-            notes.append(Note(NO_PLAYER))
-    elif player is None:
+    if player is None:
         # No position means no radius to measure. Listing everything at least names
         # the bosses that are out, and the note keeps that from looking deliberate.
         notes.append(Note(NO_PLAYER))
@@ -193,6 +173,11 @@ def build_plan(
                                  row.name,
                                  row.block.y, row.block.x))
 
+    styled = sum(1 for row in chosen if settings.style_colour(row.block))
+    if settings.highlights:
+        # Reported even when nothing matched: "why is it not red?" is answered by
+        # seeing that the rule is loaded and that no boss is standing on it.
+        notes.append(Note("styles", (("rules", len(settings.highlights)), ("matched", styled))))
     if settings.include_missions:
         notes.append(Note("missions"))
     if beyond:
@@ -209,7 +194,6 @@ def build_plan(
         total_sightings=len(sightings),
         nearby_sightings=len(chosen),
         shown=len(shown),
-        suppressed_by_whitelist=suppressed if whitelisted_only else 0,
         beyond_radius=beyond,
     )
 

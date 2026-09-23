@@ -78,55 +78,47 @@ def test_a_bearing_is_given_for_each_boss() -> None:
     assert plan.rows[0].direction("en") == "E3N2"
 
 
-def test_whitelist_mode_shows_only_whitelisted_coordinates() -> None:
+def test_a_style_rule_never_removes_a_row() -> None:
+    # This is the whole difference from the whitelist it replaced: a rule changes how a
+    # matching row is drawn and nothing else, so a style for one corner of the map does
+    # not hide the rest of it.
     player = Block(1000, 1000)
     found = events(
-        {"name": "Watched", "blocks": [(1001, 1000)]},
-        {"name": "Ignored", "blocks": [(1002, 1000)]},
+        {"name": "Styled", "blocks": [(1001, 1000)]},
+        {"name": "Plain", "blocks": [(1002, 1000)]},
+        {"name": "Far", "blocks": [(1200, 1200)]},
     )
-    settings = parse_settings({"radius_blocks": 20, "whitelist_mode": True,
-                               "whitelist": "1001,1000"})
+    settings = parse_settings({"radius_blocks": 20, "highlights": "red=1001,1000"})
     plan = build_plan(found, player, settings, NOW)
-    assert [row.name for row in plan.rows] == ["Watched"]
-    assert plan.suppressed_by_whitelist == 1
-    assert plan.rows[0].whitelisted
+    assert [row.name for row in plan.rows] == ["Styled", "Plain"]
+    assert settings.style_colour(Block(1001, 1000)) == (0xFF, 0x33, 0x33)
+    assert settings.style_colour(Block(1002, 1000)) is None
 
 
-def test_whitelist_mode_with_an_empty_whitelist_shows_nothing_and_says_so() -> None:
+def test_the_plan_says_how_many_rules_are_loaded_and_how_many_rows_matched() -> None:
+    # "Why is it not red?" is answered by seeing that the rule is loaded and that no boss
+    # is standing on it, rather than by guessing at the settings file.
     player = Block(1000, 1000)
-    plan = build_plan(events({"name": "Any", "blocks": [(1000, 1000)]}), player,
-                      parse_settings({"whitelist_mode": True}), NOW)
-    assert plan.rows == ()
-    assert Note("whitelist_empty") in plan.notes
+    found = events({"name": "Plain", "blocks": [(1002, 1000)]})
+    hit = build_plan(found, player,
+                     parse_settings({"radius_blocks": 20, "highlights": "red=1002,1000"}), NOW)
+    assert Note("styles", (("rules", 1), ("matched", 1))) in hit.notes
+    miss = build_plan(found, player,
+                      parse_settings({"radius_blocks": 20, "highlights": "red=1001,1000"}), NOW)
+    assert Note("styles", (("rules", 1), ("matched", 0))) in miss.notes
+    # No rules at all means no note: the default readout should not carry a line about a
+    # feature nobody is using.
+    assert not [note for note in build_plan(found, player, parse_settings({}), NOW).notes
+                if note.code == "styles"]
 
 
-def test_whitelist_mode_ignores_the_radius_for_a_watched_boss() -> None:
-    # The point of watching a coordinate is to hear about it wherever you are, so a
-    # whitelisted boss outside the radius is still shown.
+def test_a_rule_with_a_radius_styles_the_whole_neighbourhood() -> None:
     player = Block(1000, 1000)
-    found = events({"name": "Watched", "blocks": [(1100, 1100)]})
-    settings = parse_settings({"radius_blocks": 3, "whitelist_mode": True,
-                               "whitelist": "1100,1100:5"})
+    found = events({"name": "Near", "blocks": [(1001, 1001)]})
+    settings = parse_settings({"radius_blocks": 20, "highlights": "red=1000,1000:1"})
     plan = build_plan(found, player, settings, NOW)
-    assert [row.name for row in plan.rows] == ["Watched"]
-    assert plan.rows[0].distance == 100
-
-
-def test_whitelists_off_shows_everything_inside_the_radius() -> None:
-    player = Block(1000, 1000)
-    found = events({"name": "A", "blocks": [(1001, 1000)]}, {"name": "B", "blocks": [(1002, 1000)]})
-    settings = parse_settings({"radius_blocks": 20, "whitelist": "1001,1000"})
-    plan = build_plan(found, player, settings, NOW)
-    assert len(plan.rows) == 2
-    assert plan.suppressed_by_whitelist == 0
-
-
-def test_a_boss_with_one_whitelisted_spawn_block_is_shown_at_that_block() -> None:
-    player = Block(1000, 1000)
-    found = events({"name": "Many", "blocks": [(1001, 1000), (1050, 1050)]})
-    settings = parse_settings({"whitelist_mode": True, "whitelist": "1050,1050"})
-    plan = build_plan(found, player, settings, NOW)
-    assert [row.block for row in plan.rows] == [Block(1050, 1050)]
+    assert len(plan.rows) == 1
+    assert settings.style_colour(plan.rows[0].block) == (0xFF, 0x33, 0x33)
 
 
 def test_with_no_player_position_everything_is_listed_with_a_note() -> None:

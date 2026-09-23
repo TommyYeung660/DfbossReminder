@@ -8,6 +8,11 @@ REM
 REM Deliberately a .cmd, not a .ps1: PowerShell 5.1 reads a BOM-less file as ANSI, and
 REM a batch file has no such trap.
 REM
+REM One exe, because the tool is one program: with no arguments it opens the settings
+REM window, and that window starts the overlay itself. There used to be a second
+REM DFBossReminderConfig.exe; it is gone, and this build deletes a stale one from the
+REM Desktop so a leftover cannot be double-clicked by mistake.
+REM
 REM Usage (game PC):  tools\pc\build-exe.cmd
 setlocal
 set "REPO=C:\DFTools\DfbossReminder"
@@ -26,12 +31,13 @@ py -m PyInstaller --noconfirm --onefile --name DFBossReminder ^
 if not exist "%OUT%\DFBossReminder.exe" (echo no exe produced & exit /b 1)
 for %%F in ("%OUT%\DFBossReminder.exe") do echo Built %%F  (%%~zF bytes, %%~tF)
 
-REM The settings window is built as its own --windowed exe, so it opens from a desktop
-REM shortcut without a console behind it, and so it can be opened with the game shut.
-py -m PyInstaller --noconfirm --onefile --windowed --name DFBossReminderConfig ^
-   --paths src --distpath "%OUT%" --workpath build-config --specpath build ^
-   tools\dfboss_config_main.py || (echo config build failed & exit /b 1)
-
-if not exist "%OUT%\DFBossReminderConfig.exe" (echo no config exe produced & exit /b 1)
-for %%F in ("%OUT%\DFBossReminderConfig.exe") do echo Built %%F  (%%~zF bytes, %%~tF)
+if exist "%OUT%\DFBossReminderConfig.exe" (
+    del /q "%OUT%\DFBossReminderConfig.exe" 2>nul
+    if exist "%OUT%\DFBossReminderConfig.exe" (
+        echo WARNING: a stale DFBossReminderConfig.exe is still on the Desktop ^
+(close it and rebuild, or delete it by hand)
+    ) else (
+        echo removed the old DFBossReminderConfig.exe: the settings window is in this exe now
+    )
+)
 endlocal

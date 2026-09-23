@@ -4,15 +4,20 @@ The shape of one pass is fixed and small on purpose:
 
 1. read the player's settings (once, from a JSON file, overridden by the command line);
 2. fetch the boss map and the player's ``gpscoords``;
-3. build the plan - whitelist first, then the radius;
+3. build the plan - everything within the radius;
 4. draw it into the overlay (or the console).
 
 Every step can fail without taking the tool down. A failed fetch keeps the last
 known plan and marks it stale rather than blanking the screen, an absent game
 window falls back to the screen, and a machine that is not Windows falls back to
 the console. What the tool never does is guess: with no player position it says so
-instead of assuming the origin, and with a whitelist entry it cannot parse it says
-which entry was wrong.
+instead of assuming the origin, and a style rule or coordinate it cannot parse is
+reported as the text that was wrong.
+
+There is also the settings window, which is how the tool is normally started: it runs
+the readout in this same process, so the player opens one program, presses 開始, and the
+overlay appears. The console path is unchanged and is what the probes, ``--once`` and the
+runbook use.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -38,7 +44,7 @@ from .domain.settings import (
     parse_settings,
     to_dict,
 )
-from .domain.whitelist import WhitelistError, parse_whitelist
+from .domain.styles import StyleError, parse_highlights
 from .services.profiler import ProfilerClient, ProfilerError, fetch_state
 from .services.gamefont import FONT_FAMILY as GAME_FONT_FAMILY
 from .services.gamefont import ensure_cached as ensure_game_font
@@ -47,8 +53,6 @@ from .ui import layout, view
 from .ui.panel import Overlay, Row
 
 DEFAULT_SETTINGS_PATH = "~/.dfbossreminder/settings.json"
-TOGGLE_HOTKEY_ID = 1
-DEFAULT_TOGGLE_HOTKEY = "F8"
 
 
 # --------------------------------------------------------------------------- settings
@@ -98,21 +102,21 @@ def apply_overrides(settings: Settings, args: argparse.Namespace) -> tuple[Setti
     if args.direction_style:
         updates["direction_style"] = args.direction_style
         changed = True
-    if args.whitelist is not None:
+    if args.highlight:
         try:
-            updates["whitelist"] = parse_whitelist(args.whitelist)
-        except WhitelistError as error:
-            raise SystemExit(f"--whitelist: {error}") from error
+            updates["highlights"] = parse_highlights(args.highlight)
+        except StyleError as error:
+            raise SystemExit(f"--highlight: {error}") from error
         changed = True
-    if args.whitelist_add:
+    if args.highlight_add:
         try:
-            combined = list(settings.whitelist) + list(parse_whitelist(";".join(args.whitelist_add)))
-        except WhitelistError as error:
-            raise SystemExit(f"--whitelist-add: {error}") from error
-        updates["whitelist"] = tuple(combined)
+            added = parse_highlights(args.highlight_add)
+        except StyleError as error:
+            raise SystemExit(f"--highlight-add: {error}") from error
+        updates["highlights"] = tuple(settings.highlights) + tuple(added)
         changed = True
-    if args.whitelist_mode is not None:
-        updates["whitelist_mode"] = args.whitelist_mode == "on"
+    if args.no_highlights:
+        updates["highlights"] = ()
         changed = True
     if args.presentation:
         updates["presentation"] = args.presentation
@@ -149,9 +153,6 @@ def apply_overrides(settings: Settings, args: argparse.Namespace) -> tuple[Setti
         changed = True
     if args.language:
         updates["language"] = args.language
-        changed = True
-    if args.hotkey:
-        updates["hotkey"] = args.hotkey
         changed = True
     if args.align:
         updates["align"] = args.align
@@ -210,12 +211,6 @@ class ConsolePresenter:
     def describe(self) -> str:
         return "console output"
 
-    def follow(self, window: GameWindow | None) -> str:
-        return ""
-
-    def hotkey(self) -> str | None:
-        return None
-
     def close(self) -> None:
         return None
 
@@ -252,13 +247,11 @@ class OverlayPresenter:
         self,
         settings: Settings,
         use_client_area: bool,
-        hotkey: str = DEFAULT_TOGGLE_HOTKEY,
         font_cache: Path | None = None,
         log=print,  # noqa: ANN001
     ) -> None:
         self.settings = settings
         self.use_client_area = use_client_area
-        self.hotkey_name = hotkey
         # Where the client's font is kept once it has been read out of its assets. It
         # belongs beside the settings, in this project's own state directory - never in
         # the repository, because the font is not this project's to redistribute.
@@ -267,13 +260,11 @@ class OverlayPresenter:
         self.notes: list[str] = []
         self.overlay: Overlay | None = None
         self.window: GameWindow | None = None
-        self.hotkey_registered = False
         # Every overlay presentation needs the client: ``overlay`` and ``below-minimap``
         # to anchor inside it, and ``panel`` because a readout of a game that is not
         # running has nothing to say. This raises GameNotRunning, which main reports.
         self.window = game_window_or_refuse(log)
         self._place(self._area())
-        self._register_hotkey()
 
     def _area(self) -> tuple[Rect, str]:
         """The rectangle to anchor to, and a note about which one it was."""
@@ -298,7 +289,7 @@ class OverlayPresenter:
             return layout.place_below_minimap(
                 area.left, area.top, self.settings.minimap_left, self.settings.minimap_top,
                 self.settings.minimap_size, self.settings.width, height,
-                self.settings.minimap_gap)
+                self.settings.minimap_gap, self.settings.offset_x, self.settings.offset_y)
         return layout.place(self.settings.anchor, area.left, area.top, area.width,
                             area.height, self.settings.width, height,
                             self.settings.offset_x, self.settings.offset_y)
@@ -351,21 +342,6 @@ class OverlayPresenter:
         self.notes.append(f"using the game's own font: {face}")
         return face
 
-    def _register_hotkey(self) -> None:
-        """Take the whitelist toggle key, and record which way it went.
-
-        Reported either way, because "the toggle works" is a claim that needs a record:
-        a silent failure here looks exactly like a hotkey nobody pressed. This used to
-        sit at the end of :meth:`_game_font_face`, after its ``return``, which made it
-        dead code - the toggle was documented and never registered.
-        """
-        if not self.hotkey_name or self.overlay is None:
-            return
-        self.hotkey_registered = self.overlay.register_hotkey(self.hotkey_name, TOGGLE_HOTKEY_ID)
-        self.notes.append(f"{self.hotkey_name} toggles whitelist mode"
-                          if self.hotkey_registered
-                          else f"could NOT register {self.hotkey_name} as a hotkey")
-
     def draw(self, plan: Plan, settings: Settings, account: str, status: str, stale: bool) -> None:
         self.settings = settings
         if self.overlay is None:
@@ -401,24 +377,24 @@ class OverlayPresenter:
             Row(view.status_text("hidden_rows", settings.language, count=hidden),
                 settings.colour("note")),)
 
-    def follow(self, window: GameWindow | None) -> str:
-        """Re-anchor when the client moves; returns a note when the anchor changed."""
-        if self.overlay is None or window is None:
-            return ""
-        if not self.use_client_area and self.settings.anchor != "below-minimap":
-            return ""
-        area = window.client
-        left, top = self._corner(area, self.overlay.height)
-        if (left, top) != (self.overlay.left, self.overlay.top):
-            self.overlay.move_to(left, top)
-            return f"moved with the client to ({left}, {top})"
-        return ""
+    def reposition(self) -> str:
+        """Put the window where the settings now say it goes.
 
-    def hotkey(self) -> str | None:
-        if self.overlay is not None and self.hotkey_registered and \
-                self.overlay.hotkey_pressed(TOGGLE_HOTKEY_ID):
-            return "toggle-whitelist"
-        return None
+        The readout used to *follow* the client, re-anchoring itself under the minimap
+        every few seconds. The player asked for that to go on 2026-09-23: it moved the
+        list under them while they were reading it, it re-measured a window that had not
+        moved, and there was no way to switch it off. Position is now decided once at
+        start and afterwards only when the player moves it from the settings window -
+        which is why this takes no arguments: it re-reads the same settings a start would.
+        """
+        if self.overlay is None:
+            return ""
+        area, _note = self._area()
+        left, top = self._corner(area, self.overlay.height)
+        if (left, top) == (self.overlay.left, self.overlay.top):
+            return ""
+        self.overlay.move_to(left, top)
+        return f"moved to ({left}, {top})"
 
     def describe(self) -> str:
         if self.overlay is None:
@@ -430,8 +406,6 @@ class OverlayPresenter:
 
     def close(self) -> None:
         if self.overlay is not None:
-            if self.hotkey_registered:
-                self.overlay.unregister_hotkey(TOGGLE_HOTKEY_ID)
             self.overlay.close()
 
 
@@ -443,7 +417,6 @@ def make_presenter(settings: Settings, font_cache: Path | None = None, log=print
         return ConsolePresenter()
     try:
         return OverlayPresenter(settings, use_client_area=settings.presentation == "overlay",
-                                hotkey=settings.hotkey or DEFAULT_TOGGLE_HOTKEY,
                                 font_cache=font_cache, log=log)
     except GameNotRunning:
         # Requirement: no game, no overlay. Falling back to the console here would
@@ -482,7 +455,6 @@ class Watch:
         self.last_error = ""
         self.failures = 0
         self.next_fetch = 0.0
-        self.next_window_check = 0.0
         self.dumped = False
 
     # ------------------------------------------------------------------ fetching
@@ -530,15 +502,6 @@ class Watch:
         if now >= self.next_fetch:
             self.next_fetch = now + self.settings.poll_seconds
             self.refresh(now)
-        if now >= self.next_window_check:
-            self.next_window_check = now + self.settings.watch_pid_seconds
-            note = self.presenter.follow(find_game_window() if self.settings.presentation == "overlay"
-                                         else None)
-            if note:
-                self.log(note)
-        action = self.presenter.hotkey()
-        if action == "toggle-whitelist":
-            self.toggle_whitelist()
         status, stale = self.status(now)
         self.presenter.draw(self.plan(now), self.settings, self.account, status, stale)
         if self.dump_frame and not self.dumped:
@@ -550,27 +513,40 @@ class Watch:
                 self.dumped = True
                 self.log(f"overlay surface written to {written}; {self.presenter.describe()}")
 
-    def toggle_whitelist(self) -> None:
-        """Flip the whitelist mode, remember it, and say so in the log."""
-        mode = not self.settings.whitelist_mode
-        self.settings = replace(self.settings, whitelist_mode=mode)
-        if mode and not self.settings.whitelist:
-            self.log("whitelist mode ON, but the whitelist is empty - nothing will be shown")
-        else:
-            self.log(f"whitelist mode {'ON' if mode else 'OFF'} "
-                     f"({len(self.settings.whitelist)} entries)")
-        try:
-            save_settings(self.path, self.settings)
-        except OSError as error:
-            self.log(f"could not save settings: {error}")
+    def relocate(self, settings: Settings) -> str:
+        """Adopt new settings (a position nudge) and move the window now.
 
-    def run(self, seconds: float) -> None:
+        Called from the settings window while this loop is running in a thread, so it
+        only replaces the settings object and asks the presenter to move - the next tick
+        draws with the new settings either way, and this makes the move immediate instead
+        of up to one tick later.
+        """
+        self.settings = settings
+        move = getattr(self.presenter, "reposition", None)
+        return move() if move else ""
+
+    def run(self, seconds: float | None = None, stop: threading.Event | None = None) -> None:
+        """Loop until the time is up, the stop flag is set, or the process is interrupted.
+
+        ``stop`` is what lets the settings window run this in a thread and take it back
+        down on 停止. Both ends are checked before the first draw and after every sleep,
+        so stopping never waits for a fetch.
+        """
         started = time.monotonic()
-        now = time.monotonic()
-        self.tick(now)
+        self.tick(time.monotonic())
         try:
-            while time.monotonic() - started < seconds:
-                time.sleep(self.interval)
+            while not (stop and stop.is_set()):
+                if seconds is not None and time.monotonic() - started >= seconds:
+                    break
+                # The sleep is in slices so 停止 is responsive: a full console interval
+                # is five seconds, and a button that takes five seconds to react reads as
+                # a button that did not work.
+                slept = 0.0
+                while slept < self.interval:
+                    if stop and stop.is_set():
+                        return
+                    time.sleep(0.1)
+                    slept += 0.1
                 self.tick(time.monotonic())
         finally:
             self.presenter.close()
@@ -601,7 +577,6 @@ def export_plan(plan: Plan, settings: Settings, account: str, path: Path, fetche
             "total_sightings": plan.total_sightings,
             "nearby_sightings": plan.nearby_sightings,
             "shown": plan.shown,
-            "suppressed_by_whitelist": plan.suppressed_by_whitelist,
             "beyond_radius": plan.beyond_radius,
         },
         # Both forms: the code so a machine can act on it, the text so a person can
@@ -611,7 +586,13 @@ def export_plan(plan: Plan, settings: Settings, account: str, path: Path, fetche
         "rows": [
             {"name": row.name, "amount": row.amount, "x": row.block.x, "y": row.block.y,
              "distance": row.distance, "bearing": row.direction(settings.direction_style),
-             "minutes_left": round(row.minutes_left, 2), "mission": row.is_mission}
+             "minutes_left": round(row.minutes_left, 2), "mission": row.is_mission,
+             # The colour the readout will actually draw, so a plan exported to a file
+             # says which rows its style rules caught rather than leaving it to be
+             # worked out again from the coordinates.
+             "colour": "#%02X%02X%02X" % (settings.style_colour(row.block)
+                                          or (settings.colour("big") if row.is_big
+                                              else settings.colour("list")))}
             for row in plan.rows
         ],
     }
@@ -636,6 +617,103 @@ def run_once(settings: Settings, client: ProfilerClient, json_path: str = "", lo
     return 0
 
 
+# ------------------------------------------------------------------- config window
+
+
+class OverlayController:
+    """Start, stop and place the readout on behalf of the settings window.
+
+    The window and the readout are one program now: the player opens the settings window,
+    presses 開始, and the overlay appears. Running the loop **in this process, in a
+    thread** is what makes that a merge rather than two programs talking: 停止 really
+    stops it, a position nudge takes effect immediately, and there is no second process
+    to lose track of or to leave behind.
+
+    Everything the window needs is a method here, so the window itself has no opinion
+    about presenters, threads or Windows - which is also what keeps it testable.
+    """
+
+    def __init__(self, path: Path, log=print) -> None:  # noqa: ANN001
+        self.path = path
+        self.log = log
+        self.watch: Watch | None = None
+        self.stop_event: threading.Event | None = None
+        self.thread: threading.Thread | None = None
+        self.message = "未啟動"
+
+    # ------------------------------------------------------------------ lifecycle
+    def running(self) -> bool:
+        return bool(self.thread and self.thread.is_alive())
+
+    def start(self, settings: Settings) -> tuple[bool, str]:
+        """Run the readout until :meth:`stop`. Returns ``(ok, message)``.
+
+        A refusal is a return value rather than an exception: "the game is not running"
+        is the most likely answer here, and the window shows it as a sentence instead of
+        crashing the settings window the player is standing in.
+        """
+        if self.running():
+            return True, "已經在運行"
+        try:
+            presenter = make_presenter(settings, font_cache=self.path.parent / "game-font.ttf",
+                                       log=self.log)
+        except GameNotRunning as error:
+            self.message = str(error).splitlines()[0]
+            return False, self.message
+        try:
+            save_settings(self.path, settings)
+        except OSError as error:
+            self.log(f"could not save settings: {error}")
+        client = ProfilerClient(settings.base_url or DEFAULT_BASE_URL)
+        self.watch = Watch(settings, client, presenter, self.path, log=self.log)
+        self.stop_event = threading.Event()
+        # A daemon thread, so a window closed without 停止 still takes the overlay with
+        # it: one program, one lifetime.
+        self.thread = threading.Thread(target=self._run, name="dfboss-overlay", daemon=True)
+        self.thread.start()
+        self.message = f"運行中：{presenter.describe()}"
+        return True, self.message
+
+    def _run(self) -> None:
+        assert self.watch is not None and self.stop_event is not None
+        try:
+            self.watch.run(stop=self.stop_event)
+        except Exception as error:                     # noqa: BLE001 - reported, not raised
+            # A thread that dies silently looks exactly like an overlay that works, so
+            # the reason is kept where the window can show it.
+            self.message = f"已停止（{error}）"
+            self.log(f"the readout stopped: {error}")
+
+    def stop(self) -> str:
+        if not self.running():
+            self.message = "未啟動"
+            return self.message
+        if self.stop_event:
+            self.stop_event.set()
+        if self.thread:
+            self.thread.join(timeout=10)
+        self.thread = None
+        self.watch = None
+        self.message = "已停止"
+        return self.message
+
+    # -------------------------------------------------------------------- position
+    def nudge(self, settings: Settings, direction: str, step: int) -> tuple[Settings, str]:
+        """Move the readout one step, and return the settings that say where it now is.
+
+        The offset is stored, not just applied: a nudge that vanishes on the next start
+        is a nudge the player has to redo every time.
+        """
+        offset_x, offset_y = layout.nudged(settings.anchor, settings.offset_x,
+                                           settings.offset_y, direction, step)
+        moved = replace(settings, offset_x=offset_x, offset_y=offset_y)
+        if self.watch is not None:
+            note = self.watch.relocate(moved)
+            if note:
+                self.log(note)
+        return moved, f"位移 {offset_x}, {offset_y}"
+
+
 # --------------------------------------------------------------------------- cli
 
 
@@ -650,15 +728,17 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Dead Frontier account id to remember, e.g. 14008279")
     parser.add_argument("--radius", type=int, metavar="BLOCKS",
                         help="how many blocks around the player count as nearby")
-    parser.add_argument("--whitelist", metavar="SPEC",
-                        help='replace the whitelist, e.g. "1055,986;1057,1017:2"')
-    parser.add_argument("--whitelist-add", action="append", metavar="SPEC", default=[],
-                        help="add coordinates to the whitelist (repeatable)")
-    parser.add_argument("--whitelist-mode", choices=("on", "off"), help="turn whitelist mode on or off")
+    parser.add_argument("--highlight", action="append", metavar="SPEC", default=[],
+                        help='colour boss rows at these coordinates, e.g. "red=1015,999;1020,998" '
+                             '(repeatable; replaces the list, "#RRGGBB" or a colour name)')
+    parser.add_argument("--highlight-add", action="append", metavar="SPEC", default=[],
+                        help="add one style rule to the existing list (repeatable)")
+    parser.add_argument("--no-highlights", action="store_true", help="remove every style rule")
     parser.add_argument("--include-missions", action="store_true", help="also show mission spawns")
     parser.add_argument("--presentation", choices=PRESENTATIONS, help="overlay (in game) | panel (screen) | console")
     parser.add_argument("--anchor", choices=ANCHORS, help="which corner of the area to sit in")
-    parser.add_argument("--offset", nargs=2, type=int, metavar=("X", "Y"), help="inset from the corner")
+    parser.add_argument("--offset", nargs=2, type=int, metavar=("X", "Y"),
+                        help="nudge the readout from its anchor, in pixels")
     parser.add_argument("--poll", type=float, metavar="SECONDS", help="how often to refresh")
     parser.add_argument("--max-rows", type=int, metavar="N", help="how many bosses to list")
     parser.add_argument("--width", type=int, metavar="PX", help="readout width in pixels")
@@ -675,8 +755,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help="dark shadow behind the glyphs, for a transparent backing")
     parser.add_argument("--language", choices=LANGUAGES,
                         help="language of the header, notes and status (default zh)")
-    parser.add_argument("--hotkey", metavar="KEY",
-                        help="in-game whitelist toggle key (default F8; F1-F12, Insert, Home, End)")
     parser.add_argument("--align", choices=ALIGNMENTS, help="readout text alignment")
     parser.add_argument("--no-game-font", action="store_true",
                         help="do not use the client's own HUD font")
@@ -694,8 +772,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seconds", type=float, default=0.0, help="stop after this long (0 = run until stopped)")
     parser.add_argument("--show-config", action="store_true", help="print the effective settings and exit")
     parser.add_argument("--config", action="store_true",
-                        help="open the settings window (whitelist, font size, colours); "
-                             "the game does not need to be running")
+                        help="open the settings window, which can start and stop the "
+                             "overlay; it is also what happens with no arguments, and the "
+                             "game does not need to be running")
     parser.add_argument("--no-save", action="store_true", help="do not write overrides back to the file")
     return parser
 
@@ -751,10 +830,35 @@ def _make_streams_safe() -> None:
             continue
 
 
-def main(argv: list[str] | None = None) -> int:
+def config_window(path: Path, settings: Settings, log=print) -> int:  # noqa: ANN001
+    """Open the settings window, wired to start and stop the readout in this process.
+
+    The controller is built here rather than inside ``ui/`` on purpose: the window must
+    not need to know about presenters, threads or Windows to be drawable or testable,
+    and this module is the one that already owns all three.
+    """
+    from .ui.config_gui import run_config  # noqa: PLC0415 - only needed on this path
+
+    controller = OverlayController(path, log=log)
+    return run_config(path, load=lambda: load_settings(path),
+                      save=lambda value: save_settings(path, value),
+                      controller=controller, log=log)
+
+
+def main(argv: list[str] | None = None, default_to_config: bool = False) -> int:
+    """Run the tool. ``default_to_config`` is what makes it one program.
+
+    The entry scripts pass it, so a bare double-click opens the settings window instead of
+    printing a usage error - and the window is where the overlay is started from. The
+    flag is explicit rather than "no arguments means GUI", because a test that calls
+    ``main([])`` must not open a window on whatever machine runs the suite.
+    """
     _make_streams_safe()
-    args = build_parser().parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    args = build_parser().parse_args(arguments)
     path = settings_path(args.settings)
+    if default_to_config and not arguments:
+        return config_window(path, load_settings(path))
     try:
         settings, should_save = apply_overrides(load_settings(path), args)
     except SystemExit as error:
@@ -775,10 +879,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.config:
         # Deliberately before the user-id check and before any presenter: the window
         # is how the id gets set, and it must work with the game closed.
-        from .ui.config_gui import run_config  # noqa: PLC0415 - only needed for this flag
-
-        return run_config(path, load=lambda: load_settings(path),
-                          save=lambda value: save_settings(path, value), log=print)
+        return config_window(path, settings)
 
     if not settings.user_id and not args.once:
         print("no Dead Frontier account id is set. Add one and it will be remembered:\n"
@@ -796,11 +897,8 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     print(f"DFBossReminder {__version__} - {presenter.describe()}")
     watch = Watch(settings, client, presenter, path, dump_frame=args.dump_frame, log=print)
-    if args.seconds:
-        watch.run(args.seconds)
-        return 0
     try:
-        watch.run(float("inf"))
+        watch.run(args.seconds or None)
     except KeyboardInterrupt:
         print("\nstopped")
     return 0

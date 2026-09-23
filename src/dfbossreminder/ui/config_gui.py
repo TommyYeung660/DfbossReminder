@@ -1,22 +1,26 @@
-"""The settings window: the whitelist, and how the readout looks.
+"""The settings window: this is the program's face, and it starts the readout.
 
-Requirement: an independent configuration interface, rather than editing a JSON file
-or remembering command-line flags. Three things make it worth having its own window:
+The tool is one program. With no arguments it opens this window, and 開始 runs the
+overlay in this same process - so there is no second program to find on the Desktop and
+no question of which of two exes to double-click. The window is still perfectly usable
+with the game closed: it is how the account id and the styles get set in the first place,
+and 開始 says why it cannot start instead of failing silently.
 
-* **the whitelist** is a list of coordinates, which is awkward to keep retyping on a
-  command line and easy to get wrong in a file;
-* **the font size and the colours** are things you tune by looking at the game, so
-  they need to be changeable while the game is up;
-* **the big-boss names** are the one part of the tier rule the data does not carry,
-  so the player must be able to write the list.
+Four things make it worth having its own window, rather than editing a JSON file or
+remembering command-line flags:
 
-The window is deliberately independent of the overlay: it does not need the game to
-be running, it does not create an overlay, and it writes the same settings file the
-overlay reads.
+* **coordinate styles** - the player's request was "1015,999 and 1020,998, when there is
+  a boss, show it in red", which is a table of coordinates and colours;
+* **the position buttons** - where the readout sits is tuned by looking at the game, and
+  a nudge that needs a restart before you can see it is a nudge you cannot aim;
+* **the font size and the colours** - the same reason: judged by looking at the game;
+* **the big-boss names** - the one part of the tier rule the data does not carry, so the
+  player must be able to write the list.
 
 The value-building and validation are plain functions (``form_from_settings``,
-``payload_from_form``, ``normalized``) so the rules can be tested without a display;
-only :func:`run_config` needs tkinter.
+``payload_from_form``, ``normalized``) so the rules can be tested without a display. Only
+:func:`run_config` needs tkinter, and starting the readout is delegated to whatever
+controller is handed in, so this module never needs to know about presenters or threads.
 """
 
 from __future__ import annotations
@@ -24,6 +28,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..domain.bosses import DEFAULT_BIG_BOSSES
+from ..domain.colours import normalize_colour
+from ..domain.coordinates import CoordinateError, parse_cells
+from ..domain.coordinates import to_dict as cells_to_dict
+from ..domain.styles import StyleError, parse_highlights
 from ..domain.settings import (
     ANCHORS,
     COLOUR_KEYS,
@@ -49,9 +57,9 @@ COLOUR_LABELS = {
     "border": "邊框",
 }
 
-# A whitelist entry's radius, in blocks. Bounded because a radius of 500 watches the
-# whole map and is far more likely to be a typo than an intention.
-MAX_RADIUS = 40
+# How far one press of a position button moves the readout, in pixels. Small enough to
+# place it exactly, large enough not to need twenty presses.
+NUDGE_STEP = 5
 
 
 def form_from_settings(settings: Settings) -> dict:
@@ -66,10 +74,13 @@ def form_from_settings(settings: Settings) -> dict:
         "radius_blocks": settings.radius_blocks,
         "include_missions": settings.include_missions,
         "show_all_without_player": settings.show_all_without_player,
-        "whitelist_mode": settings.whitelist_mode,
-        "whitelist": [
-            {"x": entry.block.x, "y": entry.block.y, "radius": entry.radius, "label": entry.label}
-            for entry in settings.whitelist
+        "highlights": [
+            # One rule per row: the colour and the cells it covers, as the player typed
+            # them. The text form is what the window edits because that is also what
+            # ``--highlight`` takes, so the window and the flag cannot drift.
+            {"colour": highlight.colour,
+             "cells": ";".join(cell.describe() for cell in highlight.cells)}
+            for highlight in settings.highlights
         ],
         "font_size": settings.font_size,
         "font_weight": settings.font_weight,
@@ -131,19 +142,24 @@ def payload_from_form(form: dict) -> dict:
     """Turn the widget values into the JSON-shaped payload ``parse_settings`` reads.
 
     The shapes match ``to_dict`` on purpose, so a form saved and reloaded is the same
-    settings, and so :func:`normalized` can compare them key by key.
+    settings, and so :func:`normalized` can compare them key by key. That is also why a
+    style rule's cells are parsed here rather than left as the typed text: the file stores
+    them parsed, and "you typed text, we store data" would otherwise be reported to the
+    player as a change the tool made.
     """
-    whitelist = []
-    for index, row in enumerate(form.get("whitelist") or []):
-        x, y = _int(row.get("x"), 1 << 30), _int(row.get("y"), 1 << 30)
-        if x == 1 << 30 or y == 1 << 30:
-            continue          # a half-typed row is dropped, not saved as 0,0
-        whitelist.append({
-            "x": x,
-            "y": y,
-            "radius": max(0, min(MAX_RADIUS, _int(row.get("radius"), 0))),
-            "label": str(row.get("label", "")).strip(),
-        })
+    highlights = []
+    for row in form.get("highlights") or []:
+        colour = str(row.get("colour", "")).strip()
+        cells = str(row.get("cells", "")).strip()
+        if not colour or not cells:
+            continue          # a half-filled rule is dropped, not saved as invisible
+        try:
+            parsed = cells_to_dict(parse_cells(cells))
+        except CoordinateError:
+            # Kept as typed, so the difference shows up in ``normalized``'s notes rather
+            # than being silently dropped. ``do_save`` refuses first and names the rule.
+            parsed = cells
+        highlights.append({"colour": normalize_colour(colour) or colour, "cells": parsed})
     big_bosses = [line.strip() for line in str(form.get("big_bosses", "")).splitlines()
                   if line.strip()]
     return {
@@ -151,8 +167,7 @@ def payload_from_form(form: dict) -> dict:
         "radius_blocks": _int(form.get("radius_blocks"), 8),
         "include_missions": bool(form.get("include_missions")),
         "show_all_without_player": bool(form.get("show_all_without_player")),
-        "whitelist_mode": bool(form.get("whitelist_mode")),
-        "whitelist": whitelist,
+        "highlights": highlights,
         "font_size": _int(form.get("font_size"), 10),
         "font_weight": _int(form.get("font_weight"), 300),
         "font_face": str(form.get("font_face", "")).strip(),
@@ -195,11 +210,24 @@ def normalized(payload: dict) -> tuple[Settings, list[str]]:
     return settings, notes
 
 
-def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
+def run_config(path: Path, load, save, controller=None, visible: bool = True,
+               log=print) -> int:  # noqa: ANN001
     """Open the settings window and run its event loop.
 
     ``load`` and ``save`` are injected so the window can be driven from a test with a
     temporary file, and so this module has no opinion about where settings live.
+
+    ``controller`` is whatever can start, stop and nudge the readout - ``app`` passes its
+    :class:`~dfbossreminder.app.OverlayController`, a test passes a stub. With none, the
+    開始 and 停止 buttons say so instead of failing; the window is still a working settings
+    editor, which is what a machine without a game can use.
+
+    ``visible=False`` builds the whole window and never shows it. That is for the audit
+    tool on the game PC, and it exists because of a mistake worth recording: a test that
+    *opened* the window to check it put a dozen settings windows on the developer's screen
+    while the suite ran. Verifying a window is worth doing, but not by interrupting
+    whoever is sitting at the machine - and the machine that matters is the Windows one
+    anyway, which is what ``tools/pc/audit-config-gui.py`` is for.
 
     Returns 0 when the window is closed, 1 when tkinter is unavailable (a Python
     without it is a real install) - the message says which.
@@ -219,6 +247,10 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
     settings = load()
 
     root = tk.Tk()
+    if not visible:
+        # Withdrawn before anything is built, so an audit run never puts a window in front
+        # of whoever is using the machine.
+        root.withdraw()
     root.title("DFBossReminder 設定")
     # Tall enough to show the buttons without scrolling, but never taller than the screen:
     # the window has a scrollbar, and one that opens taller than the display is worse than
@@ -250,7 +282,7 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
     scrollbar.pack(side="right", fill="y")
 
     variables: dict[str, object] = {}
-    whitelist_rows: list[dict] = []
+    style_rows: list[dict] = []
 
     def section(text: str) -> ttk.LabelFrame:
         frame = ttk.LabelFrame(body, text=text, padding=8)
@@ -290,38 +322,60 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
     check(account, "位置不明時列出所有 boss",
           "show_all_without_player", settings.show_all_without_player)
 
-    # -------------------------------------------------------------- whitelist
-    whitelist = section("白名單")
-    check(whitelist, "白名單模式：只顯示這些座標",
-          "whitelist_mode", settings.whitelist_mode)
-    ttk.Label(whitelist, text="x        y       半徑     標籤           ",
+    # ------------------------------------------------------- coordinate styles
+    styles = section("座標樣式（命中的 boss 用這個顏色顯示）")
+    ttk.Label(styles, text="座標      顏色        （1015,999 或 1015,999:2 表示連周圍兩格）",
               font=("Consolas", 9)).pack(anchor="w")
-    table = ttk.Frame(whitelist)
+    table = ttk.Frame(styles)
     table.pack(fill="x")
 
-    def add_whitelist_row(data: dict | None = None) -> None:
-        data = data or {"x": 0, "y": 0, "radius": 0, "label": ""}
+    def add_style_row(data: dict | None = None) -> None:
+        data = data or {"colour": "red", "cells": ""}
         line = ttk.Frame(table)
         line.pack(fill="x", pady=1)
-        cells = {}
-        for key, width in (("x", 7), ("y", 7), ("radius", 6), ("label", 16)):
-            variable = tk.StringVar(value=str(data.get(key, "")))
-            cells[key] = variable
-            ttk.Entry(line, textvariable=variable, width=width).pack(side="left", padx=1)
+        cells = tk.StringVar(value=str(data.get("cells", "")))
+        colour = tk.StringVar(value=str(data.get("colour", "red")))
+        ttk.Entry(line, textvariable=cells, width=30).pack(side="left", padx=1)
+
+        def pick() -> None:
+            _rgb, chosen = colorchooser.askcolor(
+                color=normalize_colour(colour.get()) or "#FF3333", title="這個樣式的顏色")
+            if chosen:
+                colour.set(chosen.upper())
+
+        swatch = tk.Label(line, textvariable=colour, width=10)
+        swatch.pack(side="left", padx=4)
+
+        def repaint(*_args) -> None:  # noqa: ANN002
+            # The swatch is the colour name as well as the colour, so a name that is not
+            # a colour shows up as grey with the name still readable instead of silently
+            # becoming the wrong shade.
+            shown = normalize_colour(colour.get())
+            swatch.configure(background=shown or "#DDDDDD",
+                             foreground="#111111" if shown else "#990000")
+
+        colour.trace_add("write", repaint)
+        repaint()
+        ttk.Button(line, text="選色", width=6, command=pick).pack(side="left", padx=2)
+        ttk.Button(line, text="顏色名", width=8,
+                   command=lambda: colour.set("red")).pack(side="left", padx=2)
 
         def remove() -> None:
-            whitelist_rows.remove(row_record)
+            style_rows.remove(row_record)
             line.destroy()
 
-        row_record = {"cells": cells, "frame": line}
-        whitelist_rows.append(row_record)
-        ttk.Button(line, text="移除", width=8, command=remove).pack(side="left", padx=4)
+        row_record = {"cells": cells, "colour": colour, "frame": line}
+        style_rows.append(row_record)
+        ttk.Button(line, text="移除", width=6, command=remove).pack(side="left", padx=4)
 
-    for existing in form_from_settings(settings)["whitelist"]:
-        add_whitelist_row(existing)
-    ttk.Button(whitelist, text="新增座標", command=add_whitelist_row).pack(anchor="w", pady=4)
-    ttk.Label(whitelist, text="半徑 0 只監看那一格；半徑 2 連周圍兩格一起監看。",
-              foreground="#666666").pack(anchor="w")
+    for existing in form_from_settings(settings)["highlights"]:
+        add_style_row(existing)
+    ttk.Button(styles, text="新增樣式", command=add_style_row).pack(anchor="w", pady=4)
+    ttk.Label(styles, text="顏色可寫 red、orange、yellow、green、cyan、blue、purple、pink、"
+                           "white，或 #RRGGBB。多組座標用「;」分隔。\n"
+                           "樣式只改顏色，不會把其他 boss 藏起來；同一格有多條規則時，"
+                           "以最上面那條為準。",
+              foreground="#666666", justify="left").pack(anchor="w")
 
     # ------------------------------------------------------------- appearance
     appearance = section("顯示外觀")
@@ -369,6 +423,23 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
     choice(placement, "對齊位置", "anchor", ANCHORS, settings.anchor)
     entry(placement, "對齊位移 x", "offset_x", value=settings.offset_x)
     entry(placement, "對齊位移 y", "offset_y", value=settings.offset_y)
+
+    # The readout no longer follows the game window - it moved under the player while
+    # they were reading it, and the player asked for that to go. Position is set here
+    # instead, and the arrows act on a running readout immediately so it can be aimed.
+    nudge = ttk.LabelFrame(placement, text="位置微調", padding=8)
+    nudge.pack(fill="x", pady=(8, 0))
+    arrow_row = ttk.Frame(nudge)
+    arrow_row.pack(anchor="w")
+    step_var = tk.StringVar(value=str(NUDGE_STEP))
+    ttk.Label(arrow_row, text="每按一次（px）").pack(side="left")
+    ttk.Entry(arrow_row, textvariable=step_var, width=5).pack(side="left", padx=4)
+    for label, direction in (("←", "left"), ("→", "right"), ("↑", "up"), ("↓", "down")):
+        ttk.Button(arrow_row, text=label, width=3,
+                   command=lambda d=direction: do_nudge(d)).pack(side="left", padx=1)
+    ttk.Label(nudge, text="按一下就把 overlay 移一步；overlay 正在跑時會立刻看到。",
+              foreground="#666666").pack(anchor="w", pady=(4, 0))
+
     ttk.Label(placement, text="below-minimap 用小地圖的矩形，座標是客戶區座標：").pack(
         anchor="w", pady=(6, 0))
     entry(placement, "小地圖 left", "minimap_left", value=settings.minimap_left)
@@ -391,13 +462,71 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
         form = {key: variable.get() for key, variable in variables.items()}
         form["colours"] = dict(colour_vars)
         form["big_bosses"] = big_box.get("1.0", "end")
-        form["whitelist"] = [{key: cell.get() for key, cell in record["cells"].items()}
-                             for record in whitelist_rows]
+        form["highlights"] = [{"colour": record["colour"].get(), "cells": record["cells"].get()}
+                              for record in style_rows]
         form["waypoints"] = [{"label": label, "x": block.x, "y": block.y}
                              for label, block in settings.waypoints]
         return form
 
+    def current() -> tuple[Settings, list[str]]:
+        """What the form says right now, through the same validation a save uses."""
+        return normalized(payload_from_form(collect()))
+
+    def do_nudge(direction: str) -> None:
+        """Move the readout one step and remember where it ended up.
+
+        Works whether or not the overlay is running: with it up, the move is immediate;
+        with it down, the offset is stored so the next 開始 uses it.
+
+        The move is saved **on top of the file's settings**, not on top of the form: a
+        half-typed edit that has not been saved yet must not be written by pressing an
+        arrow, and a rule with a typo in it must not be able to slip into the file through
+        the position buttons.
+        """
+        if controller is None:
+            return
+        try:
+            step = max(1, min(200, int(step_var.get().strip())))
+        except ValueError:
+            step = NUDGE_STEP
+            step_var.set(str(NUDGE_STEP))
+        # Written into the boxes as well: they are the record of where the readout is, and
+        # leaving them stale would make the next 儲存 undo the move.
+        moved, message = controller.nudge(load(), direction, step)
+        variables["offset_x"].set(str(moved.offset_x))
+        variables["offset_y"].set(str(moved.offset_y))
+        try:
+            save(moved)
+        except OSError as error:
+            status.configure(text=f"移動了，但存不進設定檔：{error}")
+            return
+        status.configure(text=message)
+
+    def style_problem() -> str:
+        """The first style rule the tool cannot read, or an empty string.
+
+        The rules are validated before anything is saved, and a problem *refuses the
+        save*: storing something other than what the player typed - or storing nothing
+        because one cell has a typo - is the silent correction this window exists to
+        avoid. The message names the rule, so it can be found in the table.
+        """
+        rules = payload_from_form(collect())["highlights"]
+        try:
+            parse_highlights(rules)
+        except StyleError as error:
+            return str(error)
+        for rule in rules:
+            try:
+                parse_cells(rule["cells"])
+            except CoordinateError as error:
+                return str(error)
+        return ""
+
     def do_save() -> None:
+        problem = style_problem()
+        if problem:
+            messagebox.showerror("DFBossReminder", f"座標樣式有問題，尚未儲存：\n\n{problem}")
+            return
         payload = payload_from_form(collect())
         new_settings, notes = normalized(payload)
         try:
@@ -425,19 +554,67 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
                 variables[key].set(bool(value))
         colour_vars.clear()
         colour_vars.update(fresh["colours"])
-        for record in list(whitelist_rows):
+        for record in list(style_rows):
             record["frame"].destroy()
-        whitelist_rows.clear()
-        for existing in fresh["whitelist"]:
-            add_whitelist_row(existing)
+        style_rows.clear()
+        for existing in fresh["highlights"]:
+            add_style_row(existing)
         big_box.delete("1.0", "end")
         big_box.insert("1.0", fresh["big_bosses"])
         status.configure(text=f"已從 {path} 重新載入")
 
+    def do_start() -> None:
+        """Save what the form says, then run the readout from it."""
+        if controller is None:
+            messagebox.showinfo("DFBossReminder", "這個版本沒有啟動 overlay 的功能。")
+            return
+        problem = style_problem()
+        if problem:
+            messagebox.showerror("DFBossReminder", f"座標樣式有問題，無法開始：\n\n{problem}")
+            return
+        settings_now, _notes = current()
+        if not settings_now.user_id:
+            messagebox.showinfo("DFBossReminder", "請先填 Dead Frontier 使用者 ID。")
+            return
+        try:
+            save(settings_now)
+        except OSError as error:
+            messagebox.showerror("DFBossReminder", f"無法儲存：\n{error}")
+            return
+        ok, message = controller.start(settings_now)
+        status.configure(text=message)
+        start_button.state(["disabled"] if ok else ["!disabled"])
+        stop_button.state(["!disabled"] if ok else ["disabled"])
+        if not ok:
+            # The refusal is a sentence, not a traceback: "the game is not running" is
+            # the most likely answer, and it has to read as an instruction.
+            messagebox.showinfo("DFBossReminder", message)
+
+    def do_stop() -> None:
+        if controller is None:
+            return
+        status.configure(text=controller.stop())
+        start_button.state(["!disabled"])
+        stop_button.state(["disabled"])
+
+    def on_close() -> None:
+        # One program, one lifetime: closing the window stops the readout it started,
+        # because the readout lives in this process and would die with it anyway. Saying
+        # so is better than a window that closes and leaves nothing behind.
+        if controller is not None and controller.running():
+            controller.stop()
+        root.destroy()
+
+    start_button = ttk.Button(actions, text="開始", command=do_start)
+    start_button.pack(side="left")
+    stop_button = ttk.Button(actions, text="停止", command=do_stop, state="disabled")
+    stop_button.pack(side="left", padx=6)
+    ttk.Separator(actions, orient="vertical").pack(side="left", fill="y", padx=8)
     ttk.Button(actions, text="儲存", command=do_save).pack(side="left")
     ttk.Button(actions, text="重新載入", command=do_reload).pack(side="left", padx=8)
-    ttk.Button(actions, text="關閉", command=root.destroy).pack(side="left")
-    ttk.Label(actions, text="（overlay 下次啟動時才會讀取這個檔案）",
+    ttk.Button(actions, text="關閉", command=on_close).pack(side="left")
+    root.protocol("WM_DELETE_WINDOW", on_close)
+    ttk.Label(actions, text="（關閉視窗會一併停止 overlay）",
               foreground="#666666").pack(side="left")
 
     root.mainloop()

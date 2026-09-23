@@ -225,13 +225,6 @@ def test_the_colour_conversion_matches_gdi_channel_order() -> None:
     assert _rgb((0x12, 0x34, 0x56)) == 0x00563412
 
 
-def test_the_hotkey_table_covers_the_function_keys() -> None:
-    assert panel_module.VK["F8"] == 0x77
-    assert panel_module.VK["F1"] == 0x70
-    assert panel_module.VK["F12"] == 0x7B
-    assert panel_module.MOD_NOREPEAT == 0x4000      # a held key does not repeat
-
-
 def test_the_overlay_module_imports_without_windows() -> None:
     # Importing must never bind user32, or the whole package would be unusable on a
     # development machine; only constructing the window does.
@@ -292,6 +285,39 @@ def test_the_line_metrics_follow_the_configured_font_size() -> None:
     # font size is a user setting.
     assert "line_height = max(10, int(font_size) + LINE_GAP)" in PANEL_SOURCE
     assert "rows_fitting" in PANEL_SOURCE
+
+
+def test_the_dump_writes_bmp_channel_order_not_rgb() -> None:
+    # The surface is BGRA and a 24-bit BMP is BGR, so the bytes pass through in order.
+    # Writing them as RGB swaps red and blue - invisible while every colour in use has
+    # red equal to blue, which is exactly what every green readout did. The first red
+    # style rule came out blue in the evidence because of this.
+    red = panel_module.composite_bmp_rows(bytes((0x33, 0x33, 0xFF, 0xFF)), 1, 1)
+    assert red == b"\x33\x33\xff\x00", "one red pixel, BMP order, one pad byte"
+    yellow = panel_module.composite_bmp_rows(bytes((0x00, 0xE0, 0xFF, 0xFF)), 1, 1)
+    assert yellow[:3] == b"\x00\xe0\xff", "yellow keeps its blue byte last, not first"
+    green = panel_module.composite_bmp_rows(bytes((0x33, 0xFF, 0x33, 0xFF)), 1, 1)
+    assert green[:3] == b"\x33\xff\x33", "green is symmetric, which is why this hid"
+
+
+def test_a_transparent_pixel_composites_over_the_backdrop() -> None:
+    # Alpha 0 and premultiplied source terms: the pixel is the backdrop, channel for
+    # channel. Getting this backwards paints a grey pane over the game.
+    rows = panel_module.composite_bmp_rows(bytes((0, 0, 0, 0)), 1, 1, (96, 96, 96))
+    assert rows[:3] == b"\x60\x60\x60"
+    # Half opaque red over grey: the red channel rises, the other two fall.
+    half = panel_module.composite_bmp_rows(bytes((0, 0, 128, 128)), 1, 1, (96, 96, 96))
+    blue, green, red = half[0], half[1], half[2]
+    assert red > 128 and blue < 96 and green < 96
+
+
+def test_the_dump_rows_run_bottom_up_and_are_padded() -> None:
+    # Two rows, one pixel wide: the top row is red, the bottom row is blue.
+    raw = bytes((0x33, 0x33, 0xFF, 0xFF)) + bytes((0xFF, 0x33, 0x33, 0xFF))
+    rows = panel_module.composite_bmp_rows(raw, 1, 2)
+    assert len(rows) == 8, "two rows of three bytes plus one pad byte each"
+    assert rows[0:3] == b"\xff\x33\x33", "the last source row comes first"
+    assert rows[4:7] == b"\x33\x33\xff"
 
 
 def test_a_cleared_surface_gets_its_glyph_pixels_made_opaque_again() -> None:

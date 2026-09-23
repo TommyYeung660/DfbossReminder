@@ -217,8 +217,7 @@ def test_every_note_code_has_both_languages() -> None:
     # A note with no wording would print its own code at the player.
     for code, (zh, en) in view.NOTE_TEXT.items():
         assert zh and en and zh != code and en != code
-    for code in ("within", "beyond", "no_player", "whitelist", "whitelist_empty",
-                 "missions", "capped"):
+    for code in ("within", "beyond", "no_player", "styles", "missions", "capped"):
         assert code in view.NOTE_TEXT
 
 

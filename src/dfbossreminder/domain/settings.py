@@ -22,13 +22,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from .bosses import DEFAULT_BIG_BOSSES
+from .colours import hex_to_rgb as _hex_to_rgb
 from .geometry import Block
-from .whitelist import (
-    WhitelistEntry,
-    WhitelistError,
-    parse_whitelist,
-    to_dict as whitelist_to_dict,
-)
+from .styles import Highlight, StyleError, colour_for, parse_highlights
+from .styles import to_dict as highlights_to_dict
 
 MIN_USER_ID_LENGTH = 5
 MAX_USER_ID_LENGTH = 12
@@ -77,9 +74,10 @@ class Settings:
     # still counts as "nearby". Configurable at runtime and stored here.
     radius_blocks: int = 8
 
-    # The third requirement: when on, only bosses at a whitelisted coordinate show.
-    whitelist_mode: bool = False
-    whitelist: tuple[WhitelistEntry, ...] = ()
+    # The third requirement used to be a whitelist filter; the player replaced it on
+    # 2026-09-23 with **coordinate styles** - the cells stay, the filtering does not, and
+    # instead a boss at a named cell is drawn in the colour that rule carries.
+    highlights: tuple[Highlight, ...] = ()
 
     # A mission spawn is a special enemy at a fixed place for a mission reward,
     # not a boss cycle. Off by default because it is not what a boss run is.
@@ -102,10 +100,6 @@ class Settings:
     # known.
     height: int = 420
     max_rows: int = 12
-    # The in-game whitelist toggle. Configurable because F8 is not free on every
-    # machine - on the game PC something else already holds it - and a toggle that
-    # cannot register is a toggle that does not exist.
-    hotkey: str = "F8"
 
     # The minimap's rectangle in client coordinates, and how far below it the
     # readout starts. These are what ``anchor = below-minimap`` is measured from.
@@ -142,7 +136,6 @@ class Settings:
     game_font: bool = True
     align: str = "right"
     waypoints: tuple[tuple[str, Block], ...] = (DEFAULT_WAYPOINT,)
-    watch_pid_seconds: float = 5.0
 
     def with_user_id(self, user_id: str) -> "Settings":
         return replace(self, user_id=user_id)
@@ -157,7 +150,17 @@ class Settings:
         A missing or malformed key returns the shipped default rather than black, so
         a hand-edited settings file cannot make the readout invisible.
         """
-        return hex_to_rgb(self.colour_map.get(name, DEFAULT_COLOURS.get(name, "#FFFFFF")))
+        return _hex_to_rgb(self.colour_map.get(name, DEFAULT_COLOURS.get(name, "#FFFFFF")))
+
+    def style_colour(self, block: Block) -> tuple[int, int, int] | None:
+        """The colour a coordinate style gives this block, or None for the default.
+
+        None rather than a colour is the answer that matters: "no rule matched" and
+        "a rule matched the ordinary colour" are different, and only the caller knows
+        whether a big boss's own colour should win.
+        """
+        found = colour_for(self.highlights, block)
+        return _hex_to_rgb(found) if found else None
 
 
 def normalize_user_id(value: object) -> str:
@@ -226,19 +229,6 @@ def _as_bool(value: object, default: bool) -> bool:
     if isinstance(value, int):
         return bool(value)
     return default
-
-
-def hex_to_rgb(value: str) -> tuple[int, int, int]:
-    """``"#33FF33"`` -> ``(51, 255, 51)``; anything unparseable becomes white."""
-    text = (value or "").strip().lstrip("#")
-    if len(text) == 3:
-        text = "".join(char * 2 for char in text)
-    if len(text) != 6:
-        return (255, 255, 255)
-    try:
-        return (int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16))
-    except ValueError:
-        return (255, 255, 255)
 
 
 def _colour(value: object, default: str) -> str:
@@ -314,18 +304,17 @@ def parse_settings(payload: object) -> Settings:
         return Settings()
     defaults = Settings()
     try:
-        whitelist = parse_whitelist(payload.get("whitelist"))
-    except WhitelistError:
-        # A whitelist with one bad entry loses the whitelist, not the user id.
-        whitelist = ()
+        highlights = parse_highlights(payload.get("highlights"))
+    except StyleError:
+        # A styles list with one bad rule loses the styles, not the account id.
+        highlights = ()
     base_url = payload.get("base_url")
     return Settings(
         user_id=normalize_user_id(payload.get("user_id")),
         base_url=(base_url.strip().rstrip("/") if isinstance(base_url, str) and base_url.strip()
                   else defaults.base_url),
         radius_blocks=_clamp_int(payload.get("radius_blocks"), defaults.radius_blocks, 0, 200),
-        whitelist_mode=_as_bool(payload.get("whitelist_mode"), defaults.whitelist_mode),
-        whitelist=whitelist,
+        highlights=highlights,
         include_missions=_as_bool(payload.get("include_missions"), defaults.include_missions),
         show_all_without_player=_as_bool(payload.get("show_all_without_player"),
                                          defaults.show_all_without_player),
@@ -354,9 +343,6 @@ def parse_settings(payload: object) -> Settings:
         minimap_gap=_clamp_int(payload.get("minimap_gap"), defaults.minimap_gap, 0, 200),
         big_bosses=_big_bosses(payload.get("big_bosses"), defaults.big_bosses),
         waypoints=_waypoints(payload.get("waypoints"), defaults.waypoints),
-        watch_pid_seconds=_clamp_float(payload.get("watch_pid_seconds"), defaults.watch_pid_seconds,
-                                      0.5, 120.0),
-        hotkey=_text_field(payload.get("hotkey"), defaults.hotkey, limit=16).upper(),
     )
 
 
@@ -366,8 +352,7 @@ def to_dict(settings: Settings) -> dict:
         "user_id": settings.user_id,
         "base_url": settings.base_url,
         "radius_blocks": settings.radius_blocks,
-        "whitelist_mode": settings.whitelist_mode,
-        "whitelist": whitelist_to_dict(settings.whitelist),
+        "highlights": highlights_to_dict(settings.highlights),
         "include_missions": settings.include_missions,
         "show_all_without_player": settings.show_all_without_player,
         "poll_seconds": settings.poll_seconds,
@@ -396,6 +381,4 @@ def to_dict(settings: Settings) -> dict:
         "big_bosses": list(settings.big_bosses),
         "waypoints": [{"label": label, "x": block.x, "y": block.y}
                       for label, block in settings.waypoints],
-        "watch_pid_seconds": settings.watch_pid_seconds,
-        "hotkey": settings.hotkey,
     }

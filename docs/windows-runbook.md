@@ -10,7 +10,7 @@
 * 你的座標來自 dfprofiler 的帳號 `gpscoords`（就是當初要你記下的 `14008279`
   那組 DF user id），跟 boss 的座標是同一套座標系；
 * 半徑可以隨時改（`--radius`）；
-* 開白名單模式後，只有你列出的座標出現 boss 才顯示（`--whitelist`）；
+* 可以為指定的座標設定顏色：那些座標出現 boss 時就用你選的顏色顯示（`--highlight`）；
 * 讀取畫面貼在遊戲客戶區上（`--presentation overlay`），或貼在螢幕上當側邊面板
   （`--presentation panel`），也可以只在主控台印（`--presentation console`）。
 
@@ -52,17 +52,32 @@
    **注意**：`gpscoords` 是「最後已知位置」。如果你在遊戲裡沒有移動，數字不會變；
    這不是壞掉。
 
-## 設定界面（白名單、字級、顏色）
+## 設定界面（座標樣式、字級、顏色、位置）
 
 ```powershell
 tools\pc\config-gui.cmd
 ```
 
-或是桌面上的 `DFBossReminderConfig.exe`。**界面全部是繁體中文**，而且**不需要遊戲在跑**：
-帳號 id、白名單、字級、顏色、擺放位置、以及「那些 boss 算 big boss」的清單都在這裡改。
-按「儲存」會寫入 `%USERPROFILE%\.dfbossreminder\settings.json`，overlay 下次啟動時讀取；
-如果某個值被工具調整過（例如半徑填 9999 會被夾到 200），視窗會明確列出被改的欄位。
-按鈕固定在視窗底部，不用捲動就找得到；表單本身比螢幕高時會出現捲軸。
+**現在只有一個程式了**：雙擊桌面上的 `DFBossReminder.exe`（不帶任何參數）就會開這個設定視窗，
+視窗裡的 **開始** 會把 overlay 跑起來（同一個行程），**停止** 或關掉視窗就會收掉它。
+
+**界面全部是繁體中文**，而且不需要遊戲在跑就能開。帳號 id、座標樣式、字級、顏色、顯示位置、
+「位置微調」的箭頭、以及「那些 boss 算 big boss」的清單都在這裡改。按「儲存」寫入
+`%USERPROFILE%\.dfbossreminder\settings.json`；如果某個值被工具調整過（例如半徑填 9999 會被
+夾到 200），視窗會明確列出被改的欄位。按鈕固定在視窗底部，不用捲動就找得到。
+
+### 座標樣式（在指定座標出現 boss 時用指定顏色）
+
+「座標樣式」那一區，一行一條規則：左邊填座標，右邊是顏色。
+
+* 座標寫 `1015,999`，或 `1015,999:2`（連周圍兩格一起算）；多個座標用 `;` 分開。
+* 顏色可以寫 `red`、`orange`、`yellow`、`green`、`cyan`、`blue`、`purple`、`pink`、
+  `white`，或 `#RRGGBB`。按「選色」用調色盤挑。
+* 樣式**只改顏色，不會把其他 boss 藏起來**（這是它跟已刪除的白名單最大的差別）；
+  同一格有多條規則時，以最上面那條為準。
+* 沒生效時看主控台：`座標樣式 N 組，命中 M 列` —— 命中 0 就是目前沒有任何 boss 站在那些格子上。
+
+命令列等價寫法：`py -3 tools\dfboss_main.py --once --highlight "red=1015,999;1020,998"`。
 
 ## 每次遊戲前的啟動
 
@@ -82,9 +97,10 @@ powershell -ExecutionPolicy Bypass -File tools\pc\run-dfboss.ps1 -Presentation o
 
 遊戲中：
 
-* **F8** 切換白名單模式（切換後會立刻存檔）。需要疊加視窗，所以只有
-  `overlay` / `panel` 模式有這個鍵。
 * 疊加視窗是**點擊穿透**的，不會搶焦點，也不會擋到遊戲操作。
+* 位置不會自己跟著遊戲視窗跑（這個功能已經移除）；要調位置就在設定視窗按
+  「位置微調」的箭頭，overlay 正在跑時會立刻跟著動。
+* 沒有熱鍵：要停就在設定視窗按「停止」，或直接關掉那個視窗。
 
 停止：
 
@@ -92,22 +108,14 @@ powershell -ExecutionPolicy Bypass -File tools\pc\run-dfboss.ps1 -Presentation o
 powershell -ExecutionPolicy Bypass -File tools\pc\stop-dfboss.ps1
 ```
 
-## 白名單怎麼用
+## 已移除的白名單
 
-```
-1055,986            只監看這一格
-1055,986:2          監看這一格，以及周圍 2 格內的所有格子
-1055,986:2=Bunker   同上，但在畫面上標成 Bunker
-```
+「只顯示白名單座標的 boss」這個模式在 2026-09-23 被移除了，取代它的是上方的座標樣式。
+兩者差在被顯示的**那一列**：白名單決定「有沒有這一列」，樣式只決定「這一列什麼顏色」。
+所以樣式不會讓你看不到其他 boss，也不會出現「畫面是空的，但我不知道是沒 boss 還是
+白名單沒命中」這種情況——主控台會直接寫 `命中 0 列`。
 
-多筆用 `;` 分隔：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\pc\run-dfboss.ps1 -Whitelist "1054,987:3=Bunker;1055,986" -WhitelistMode on
-```
-
-白名單模式**不受半徑限制**：白名單上的座標不管你在多遠都會顯示——那正是「盯住一個
-點」的意義。白名單打開但清單是空的時，畫面不會顯示任何 boss，並且會說明原因。
+設定檔裡舊的 `whitelist` / `whitelist_mode` 欄位會被忽略（不會報錯，也不會回來）。
 
 ## 要傳回來的證據（已經做過一次,這是重跑的方法）
 
@@ -162,20 +170,27 @@ tools/run_on_pc.sh 'call tools\pc\verify-overlay.cmd overlay below-minimap 24 "2
 「客戶區上 + 10 + 215 + 4」。那三個數字是量出來的 minimap 矩形（客戶區座標），
 不是猜的。`overlay-run.log` 會一起印出來。
 
-### 2b-2. 查哪個切換鍵可用
+### 2b-2. 熱鍵
 
-```powershell
-tools/run_on_pc.sh 'py -3 tools\pc\probe-hotkeys.py'
-```
-
-白名單切換鍵是全域熱鍵,被別的程式佔用就註冊不到(而且會明確回報)。這台機器上 F8
-是空的、只有 F12 被佔用。要換鍵用 `--hotkey F6`,或在設定界面改。
+**沒有任何全域熱鍵了**（唯一那個是切換白名單用的，白名單已刪除）。開始、停止、位置全部在設定視窗。
 
 ### 2c. 驗證設定界面開得起來
 
 ```powershell
 tools/run_on_pc.sh 'py -3 tools\pc\probe-config-gui.py'
 ```
+
+### 2c-2. 稽核設定界面的內容（不顯示視窗）
+
+```powershell
+tools/run_on_pc.sh 'py -3 tools\pc\audit-config-gui.py'
+tools/run_on_pc.sh 'py -3 tools\pc\audit-config-gui.py --live --seconds 10'
+```
+
+這是**不把視窗顯示出來**的檢查：它把視窗建成 withdrawn，走一遍元件樹，確認座標樣式
+表、開始/停止、四個位置箭頭都在，並且按一次那些不需要遊戲的按鈕。加 `--live` 會用真正的
+controller 按「開始」（overlay 會真的出現在遊戲上約 N 秒），再按「停止」收掉。
+（先前有一個 pytest 檔會把視窗真的開起來檢查，結果在你的 Mac 上彈了十幾個視窗——已刪除。）
 
 應該看到 `found the settings window: ... visible=True` 與
 `PASS: the settings window opens, with no game required`。它也會用 `PrintWindow` 拍一張

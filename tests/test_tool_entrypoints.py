@@ -55,10 +55,10 @@ def test_the_entry_script_sets_the_radius_from_the_command_line() -> None:
     assert json.loads(result.stdout)["radius_blocks"] == 17
 
 
-def test_the_help_lists_the_four_requirements_as_options() -> None:
+def test_the_help_lists_the_requirements_as_options() -> None:
     result = run([PYTHON, "tools/dfboss_main.py", "--help"])
     assert result.returncode == 0
-    for option in ("--user-id", "--radius", "--whitelist", "--presentation"):
+    for option in ("--user-id", "--radius", "--highlight", "--presentation"):
         assert option in result.stdout, f"{option} must be a documented option"
 
 

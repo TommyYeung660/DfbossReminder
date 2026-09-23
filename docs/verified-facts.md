@@ -112,6 +112,24 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | **VIPER NORA has no CJK glyphs**, so the Chinese labels cannot be drawn in it - the header and notes would be a row of empty boxes beside boss lines that look perfect. Two faces are kept and each row picks by its content | Recorded live | the render probe drew 個附近 as boxes; the capture shows the Chinese rows in MS Gothic |
 | The readout is right-aligned, so its rows share a right edge with the minimap | Recorded live | the same capture |
 
+### Verified on the game PC, 2026-09-23 (seventh session: styles, one program, no following)
+
+The player's four requests: drop the coordinate whitelist, add per-coordinate colours,
+merge the settings window and the readout into one program with a start button, and stop
+the overlay following the game window (it no longer worked) in favour of position buttons.
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| **Coordinate styles work as asked**: `red=1053,1019;1056,1016` painted those two rows red and `yellow=1058,1016;1058,1014` painted those two yellow, with every other row left green | Recorded live | `docs/evidence/2026-09-23-styles-red-yellow-surface.png` and `…-styles-run.txt` |
+| A rule **never removes a row** (the difference from the whitelist it replaced), and the console reports `座標樣式 N 組，命中 M 列` so "why is it not red?" is answerable | Recorded live + Implementation fact | the same run; `tests/test_plan.py` |
+| **The dump had been writing BMP rows as RGB** where the format is BGR, so every red in every piece of evidence this project produced came out blue. It was invisible for as long as the only colour in use was `#33FF33`, where red and blue are equal - the first red rule exposed it | Recorded live (found by looking at the picture, and confirmed by the pixel histogram) | `docs/evidence/2026-09-23-dump-channel-fix.png` shows the same surface before and after; `tests/test_panel_contract.py` pins the channel order |
+| **One program**: the Desktop `DFBossReminder.exe`, launched with no arguments, opens the settings window (`DFBossReminder 設定`), and **開始** in that window starts the overlay **in the same process** | Recorded live | `docs/evidence/2026-09-23-settings-window-styles.bmp`; `…-config-gui-audit-live.txt`: `開始 (real controller): 運行中：overlay visible=True at (1246,359)-(1586,779)` |
+| **停止 really stops it**: after 10 s the run reports `已停止`, `running=False`, and no overlay window is left behind | Recorded live | the same log |
+| The four **position arrows** nudge the readout one step in the direction of the arrow, and the offset is stored so the next start uses it | Recorded live | `…-config-gui-audit.txt`: `the four arrows nudged: [('right', 5), ('left', 5), ('down', 5), ('up', 5)]`; `tests/test_layout.py` pins the sign for every anchor |
+| The whole widget tree can be checked **without showing anybody a window**: the audit builds it withdrawn and reports `viewable=False` | Recorded live | `…-config-gui-audit.txt` |
+| The **whitelist is gone** from the window and from the settings: `白名單` does not appear, and the audit fails if it comes back | Recorded live | the same audit, which checks for forbidden labels |
+| The old `DFBossReminderConfig.exe` is **deleted by the build**, so there is one entry point and no stale second exe to double-click | Recorded live | `docs/evidence/2026-09-23-exe-build-styles.txt`; the Desktop holds only `DFBossReminder.exe` (11,131,174 bytes) |
+
 ### Verified on the game PC, 2026-09-23 (sixth session: the overlay is the boss list only)
 
 The player asked for three changes: no header line in the overlay, nothing below the

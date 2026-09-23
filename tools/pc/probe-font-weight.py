@@ -37,7 +37,8 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if SRC_ROOT.is_dir() and str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from dfbossreminder.domain.settings import DEFAULT_COLOURS, hex_to_rgb  # noqa: E402
+from dfbossreminder.domain.colours import hex_to_rgb  # noqa: E402
+from dfbossreminder.domain.settings import DEFAULT_COLOURS  # noqa: E402
 from dfbossreminder.services.gamefont import CACHE_NAME, FONT_FAMILY  # noqa: E402
 from dfbossreminder.ui import panel as panel_module  # noqa: E402
 from dfbossreminder.ui.panel import (  # noqa: E402

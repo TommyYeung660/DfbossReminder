@@ -8,7 +8,7 @@ from dfbossreminder.domain.settings import (
     parse_settings,
     to_dict,
 )
-from dfbossreminder.domain.whitelist import parse_whitelist
+from dfbossreminder.domain.styles import parse_highlights
 
 
 def test_an_empty_mapping_yields_the_documented_defaults() -> None:
@@ -64,23 +64,26 @@ def test_the_radius_is_configurable_as_the_second_requirement_asks() -> None:
     assert parse_settings({"radius_blocks": "12"}).radius_blocks == 12
 
 
-def test_the_whitelist_round_trips_and_a_bad_one_only_loses_itself() -> None:
-    settings = parse_settings({"user_id": "14008279", "whitelist_mode": True,
-                               "whitelist": "1055,986:1=spot"})
-    assert settings.whitelist_mode
-    assert settings.whitelist == parse_whitelist("1055,986:1=spot")
-    assert parse_settings(to_dict(settings)).whitelist == settings.whitelist
+def test_the_coordinate_styles_round_trip_and_a_bad_rule_only_loses_itself() -> None:
+    settings = parse_settings({"user_id": "14008279",
+                               "highlights": [{"colour": "red", "cells": "1055,986:1"}]})
+    assert settings.highlights == parse_highlights("red=1055,986:1")
+    assert parse_settings(to_dict(settings)).highlights == settings.highlights
+    # The colour is normalised on the way in, so the file holds one spelling.
+    assert to_dict(settings)["highlights"] == [
+        {"colour": "#FF3333", "cells": [{"x": 1055, "y": 986, "radius": 1, "label": ""}]}]
 
-    broken = parse_settings({"user_id": "14008279", "whitelist": "nonsense", "radius_blocks": 20})
-    assert broken.whitelist == ()
-    assert broken.user_id == "14008279"      # the id survives a bad whitelist
+    broken = parse_settings({"user_id": "14008279", "highlights": "nonsense",
+                             "radius_blocks": 20})
+    assert broken.highlights == ()
+    assert broken.user_id == "14008279"      # the id survives a bad rule
     assert broken.radius_blocks == 20
 
 
 def test_booleans_accept_the_words_a_person_would_type() -> None:
-    assert parse_settings({"whitelist_mode": "on"}).whitelist_mode
-    assert parse_settings({"whitelist_mode": "true"}).whitelist_mode
-    assert not parse_settings({"whitelist_mode": "off"}).whitelist_mode
+    assert parse_settings({"text_shadow": "on"}).text_shadow
+    assert parse_settings({"text_shadow": "true"}).text_shadow
+    assert not parse_settings({"text_shadow": "off"}).text_shadow
     assert parse_settings({"include_missions": 1}).include_missions
 
 
@@ -92,8 +95,9 @@ def test_unknown_keys_are_dropped_rather_than_stored() -> None:
 
 def test_every_documented_field_survives_the_round_trip_unchanged() -> None:
     settings = parse_settings({
-        "user_id": "14012933", "radius_blocks": 30, "whitelist_mode": True,
-        "whitelist": [{"x": 1055, "y": 986, "radius": 2, "label": "bunker"}],
+        "user_id": "14012933", "radius_blocks": 30,
+        "highlights": [{"colour": "#FF3333", "cells": [{"x": 1015, "y": 999},
+                                                       {"x": 1020, "y": 998}]}],
         "include_missions": True, "show_all_without_player": False,
         "poll_seconds": 45, "stale_seconds": 300, "presentation": "panel",
         "anchor": "bottom-right", "offset_x": 20, "offset_y": 30, "width": 500,
@@ -105,7 +109,6 @@ def test_every_documented_field_survives_the_round_trip_unchanged() -> None:
         "minimap_left": 1060, "minimap_top": 10, "minimap_size": 215, "minimap_gap": 6,
         "big_bosses": ["Devil Hound", "Dreadstag"],
         "waypoints": [{"label": "Home", "x": 1054, "y": 987}],
-        "watch_pid_seconds": 10,
     })
     assert parse_settings(to_dict(settings)) == settings
 

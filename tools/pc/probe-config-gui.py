@@ -1,8 +1,9 @@
 """Prove the settings window opens on Windows, and that it needs no game.
 
 The window is only useful if it really appears, and it is the one part of the project
-that must work with the client closed - it is how the id and the whitelist get set in
-the first place. This starts it, looks for its window by title, photographs it, and
+that must work with the client closed - it is how the id and the styles get set in the
+first place. It is also the program's face now: with no arguments the exe opens this
+window, and 開始 in it starts the overlay. This starts it, looks for its window by title, photographs it, and
 closes it.
 
 The title is Chinese, like the rest of the window, and it is how the window is found -
@@ -14,7 +15,7 @@ happens to be running rather than requiring either answer.
 
 Usage (game PC, inside the interactive session):
     py -3 tools\\pc\\probe-config-gui.py
-    py -3 tools\\pc\\probe-config-gui.py --exe "%USERPROFILE%\\Desktop\\DFBossReminderConfig.exe"
+    py -3 tools\\pc\\probe-config-gui.py --exe "%USERPROFILE%\\Desktop\\DFBossReminder.exe"
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ WINDOW_TITLE = "DFBossReminder 設定"
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", default="",
-                        help="test a built DFBossReminderConfig.exe instead of the source")
+                        help="test the built DFBossReminder.exe instead of the source")
     parser.add_argument("--no-shot", action="store_true",
                         help="skip the screenshot (the default is to take one)")
     args = parser.parse_args()
@@ -63,7 +64,8 @@ def main() -> int:
         print("FAIL: this Python has no tkinter, so the settings window cannot open")
         return 1
 
-    command = [exe] if exe else [sys.executable, str(PROJECT_ROOT / "tools" / "dfboss_config_main.py")]
+    command = ([exe] if exe
+               else [sys.executable, str(PROJECT_ROOT / "tools" / "dfboss_main.py"), "--config"])
     print(f"starting: {' '.join(command)}")
     # Its output is Chinese: the code page the console happens to have would make the
     # error path unreadable exactly when it is needed. The exit code and whether the
