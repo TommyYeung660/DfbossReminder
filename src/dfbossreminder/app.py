@@ -391,8 +391,15 @@ class OverlayPresenter:
                 settings.colour("note")),)
 
     def reposition(self, settings: Settings | None = None,
-                   nudge: tuple[int, int] | None = None) -> str:
+                   nudge: tuple[int, int] | None = None,
+                   window: GameWindow | None = None) -> str:
         """Put the window where the settings say it goes, plus any live adjustment.
+
+        ``window`` is a freshly measured game window: the readout is anchored to the client
+        rectangle *captured when it started*, so after the player moves the game window it
+        keeps hanging off the old one. Re-measuring is what 重新校正位置 is for, and it
+        cannot happen here - ``find_game_window`` is called by the loop's thread, which is
+        the only one allowed to touch this window.
 
         The readout used to *follow* the client, re-anchoring itself under the minimap
         every few seconds. The player asked for that to go on 2026-09-23: it moved the
@@ -411,6 +418,8 @@ class OverlayPresenter:
             self.settings = settings
         if nudge is not None:
             self.adjustment = (int(nudge[0]), int(nudge[1]))
+        if window is not None:
+            self.window = window
         area, _note = self._area()
         left, top = self._corner(area, self.overlay.height)
         if (left, top) == (self.overlay.left, self.overlay.top):
@@ -543,7 +552,7 @@ class Watch:
                 self.log(f"overlay surface written to {written}; {self.presenter.describe()}")
 
     def request_settings(self, settings: Settings, nudge: tuple[int, int] | None = None,
-                         timeout: float = 5.0) -> str:
+                         remeasure: bool = False, timeout: float = 5.0) -> str:
         """Ask this loop's own thread to adopt these settings and move the window.
 
         Nothing else may move the overlay. A window belongs to the thread that created it,
@@ -560,15 +569,27 @@ class Watch:
             done = threading.Event()
             result: list[str] = [""]
             with self._requests_lock:
-                self._requests.append((settings, nudge, done, result))
+                self._requests.append((settings, nudge, remeasure, done, result))
             if not done.wait(timeout=timeout):
                 return ""
             return result[0]
         # Called from the loop's own thread (a test, or a future single-threaded caller):
         # do it here, there is nothing to hand over.
         self.settings = settings
+        return self._move(settings, nudge, remeasure)
+
+    def _move(self, settings: Settings, nudge: tuple[int, int] | None,
+              remeasure: bool) -> str:
+        """Move the readout, optionally after measuring the game window again."""
         move = getattr(self.presenter, "reposition", None)
-        return move(settings, nudge) if move else ""
+        if not move:
+            return ""
+        window = None
+        if remeasure:
+            window = find_game_window()
+            if window is None:
+                return "找不到 Dead Frontier 視窗，位置未變"
+        return move(settings, nudge, window)
 
     def _loop_is_this_thread(self) -> bool:
         """Whether this call may touch the window directly.
@@ -584,11 +605,10 @@ class Watch:
             with self._requests_lock:
                 if not self._requests:
                     return
-                settings, nudge, done, result = self._requests.popleft()
+                settings, nudge, remeasure, done, result = self._requests.popleft()
             self.settings = settings
-            move = getattr(self.presenter, "reposition", None)
             try:
-                result[0] = move(settings, nudge) if move else ""
+                result[0] = self._move(settings, nudge, remeasure)
             except Exception as error:                 # noqa: BLE001 - reported, not raised
                 result[0] = f"移動失敗：{error}"
                 self.log(f"could not move the readout: {error}")
@@ -846,7 +866,8 @@ class OverlayController:
         if self.watch is not None:
             # Through the loop's thread: the window is not ours to move (see
             # Watch.request_settings). An empty answer means it did not get there in time.
-            note = self.watch.request_settings(settings, moved, timeout=self.REQUEST_TIMEOUT)
+            note = self.watch.request_settings(settings, moved,
+                                               timeout=self.REQUEST_TIMEOUT)
             if not (note or self.watch.presenter.adjustment == moved):
                 return f"位移 {dx}, {dy}（overlay 未即時移動，稍後再試）"
         self.adjustment = moved
@@ -862,10 +883,16 @@ class OverlayController:
         """
         if self.watch is None:
             return False, "未啟動：開始時就會用這個位置"
-        note = self.watch.request_settings(settings, (0, 0), timeout=self.REQUEST_TIMEOUT)
+        # ``remeasure`` is the point of this button: the player moves the game window, the
+        # readout stays where it was (it no longer follows), and this measures the client
+        # again and puts the readout back under *its* minimap.
+        note = self.watch.request_settings(settings, (0, 0), remeasure=True,
+                                          timeout=self.REQUEST_TIMEOUT)
         if not note and self.watch.presenter.adjustment != (0, 0):
             return False, "overlay 沒有回應（可能正在抓資料），稍後再按一次"
         self.adjustment = (0, 0)
+        if "找不到" in note:
+            return False, note
         return True, note or "已在設定位置"
 
 

@@ -1,23 +1,27 @@
-DFB interactive run 23/09/2026 �g�T 12:22:45.58
+DFB interactive run 23/09/2026 �g�T 12:35:02.61
 session: interactive desktop (scheduled task)
 
-DFB-RUN-1790137365-75918
+DFB-RUN-1790138102-94442
 the window was built withdrawn; viewable=False
 101 labels, 0 starts recorded so far
 style rows rendered: 2 (2 rules configured)
-開始 (real controller): 運行中：overlay visible=True at (1301,329)-(1641,749); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
+開始 (real controller): 運行中：overlay visible=True at (1348,358)-(1688,778); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
 the position arrows were pressed; the real controller was nudged in place
 
-controller message: 運行中：overlay visible=True at (1301,329)-(1641,749); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
-after 6s: the game window is still there and the readout kept drawing
-after 開始: 1 overlay window(s), rect (1301, 329, 1641, 453)
-after four arrow presses: 1 overlay window(s), rect (1281, 329, 1621, 453)
-after 重新校正位置: 1 overlay window(s), rect (1301, 329, 1641, 453)
+controller message: 運行中：overlay visible=True at (1348,358)-(1688,778); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
+after 5s: the game window is still there and the readout kept drawing
+after 開始: 1 overlay window(s), rect (1348, 358, 1688, 482)
+after four arrow presses: 1 overlay window(s), rect (1328, 358, 1668, 482)
+after moving the game window by (120, 80): 1 overlay window(s), rect (1328, 358, 1668, 482)
+after 重新校正位置 with the window moved: 1 overlay window(s), rect (1468, 438, 1808, 562)
+  -> the readout followed the game window exactly ((120, 80))
+after putting the game window back: 1 overlay window(s), rect (1468, 438, 1808, 562)
+after 重新校正位置 with the window back: 1 overlay window(s), rect (1348, 358, 1688, 482)
 stopping: 已停止
 stopped, running=False
 after 停止: 0 overlay window(s)
-second 開始: 運行中：overlay visible=True at (1301,329)-(1641,749); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
-after a second 開始: 1 overlay window(s), rect (1301, 329, 1641, 453)
+second 開始: 運行中：overlay visible=True at (1348,358)-(1688,778); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA
+after a second 開始: 1 overlay window(s), rect (1348, 358, 1688, 482)
 final stop: 已停止
 after the final 停止: 0 overlay window(s)
 

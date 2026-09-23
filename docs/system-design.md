@@ -353,8 +353,12 @@ So the two are separated, and the names now mean what they say:
 * **位置微調**'s arrows are a **live adjustment** on top of it, held by the presenter and
   never saved. It is for "the game window moved" and "get this out of the way for a
   moment", and it lasts exactly as long as the readout does;
-* **重新校正位置** drops the adjustment and re-reads the configuration, which is the one
-  button that answers both "the window moved" and "undo my nudge".
+* **重新校正位置** drops the adjustment, **measures the game window again**, and re-reads
+  the configuration against *that* rectangle. The re-measuring is the whole point, and the
+  player said so: they move the game window while playing, the readout stays where the
+  client used to be, and nothing brought it back. Recomputing from the rectangle captured at
+  start - which is what the first version did - put the readout back on the *old* position
+  and changed nothing.
 
 The consequence worth stating: starting the readout again returns it to the configured
 position. That is the same statement as the button, and it is the one that makes the

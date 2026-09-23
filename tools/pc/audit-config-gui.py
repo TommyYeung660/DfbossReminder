@@ -39,6 +39,9 @@ from dfbossreminder.ui import config_gui  # noqa: E402
 REQUIRED_SECTIONS = ("帳號與範圍", "座標樣式", "顯示外觀", "顯示位置", "位置微調")
 REQUIRED_BUTTONS = ("開始", "停止", "儲存", "重新載入", "關閉", "←", "→", "↑", "↓", "新增樣式")
 FORBIDDEN = ("白名單", "新增座標", "remove", "choose")
+SWP_NOSIZE = 0x0001
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
 
 
 def walk(widget):  # noqa: ANN001, ANN201
@@ -66,6 +69,33 @@ def find_button(widget, text: str):  # noqa: ANN001, ANN201
         if child.winfo_class() in ("TButton", "Button") and child.cget("text") == text:
             return child
     return None
+
+
+def move_window(hwnd: int, left: int, top: int) -> None:
+    """Move a window without resizing it, leaving its z-order and activation alone."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    rect = wintypes.RECT()
+    user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect))  # noqa: B018
+    user32.SetWindowPos(wintypes.HWND(hwnd), None, int(left), int(top),
+                        rect.right - rect.left, rect.bottom - rect.top,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+
+
+def window_rect(hwnd: int) -> tuple[int, int, int, int]:
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    rect = wintypes.RECT()
+    user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect))  # noqa: B018
+    return (rect.left, rect.top, rect.right, rect.bottom)
 
 
 def overlay_windows() -> list[tuple[int, tuple[int, int, int, int]]]:
@@ -291,15 +321,45 @@ def main() -> int:
                                 "judged")
 
             realign_button = find_button(root, "重新校正位置")
+            # The player's own reason for the button: they move the game window while
+            # playing, the readout stays where the client used to be, and this brings it
+            # back. So the game window is moved here by (120, 80) and put back afterwards -
+            # a couple of seconds out of place, which is the price of testing the real
+            # thing rather than the arithmetic alone.
+            game = find_game_window()
+            if game is None:
+                problems.append("no game window to move, so re-anchoring cannot be judged")
+            else:
+                was = window_rect(game.hwnd)
+                delta = (120, 80)
+                move_window(game.hwnd, was[0] + delta[0], was[1] + delta[1])
+                time.sleep(1.5)
+                report("after moving the game window by " + str(delta))
+                if realign_button is not None:
+                    realign_button.invoke()
+                    time.sleep(1.5)
+                    moved = report("after 重新校正位置 with the window moved")
+                    if moved and first_rect:
+                        shifted = (moved[0][1][0] - first_rect[0], moved[0][1][1] - first_rect[1])
+                        if shifted != delta:
+                            problems.append(f"re-anchoring moved the readout by {shifted}, "
+                                            f"not the window's {delta}")
+                        else:
+                            print(f"  -> the readout followed the game window exactly "
+                                  f"({shifted})")
+                move_window(game.hwnd, was[0], was[1])
+                time.sleep(1.5)
+                report("after putting the game window back")
+                if realign_button is not None:
+                    realign_button.invoke()
+                    time.sleep(1.5)
+                    back = report("after 重新校正位置 with the window back")
+                    if back and first_rect and back[0][1] != first_rect:
+                        problems.append(f"the readout did not return to {first_rect}: "
+                                        f"{back[0][1]}")
+
             if realign_button is None:
                 problems.append("no 重新校正位置 button in the window")
-            else:
-                realign_button.invoke()
-                time.sleep(1.0)
-                back = report("after 重新校正位置")
-                if first_rect and back and back[0][1] != first_rect:
-                    problems.append(f"重新校正位置 did not restore the position: {first_rect} "
-                                    f"-> {back[0][1]}")
 
             print(f"stopping: {controller.stop()}")
             print(f"stopped, running={controller.running()}")

@@ -569,13 +569,14 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
         status.configure(text=f"已從 {path} 重新載入")
 
     def do_realign() -> None:
-        """Put the readout back where 顯示位置 says: drop the arrows' adjustment, re-read.
+        """Re-anchor the readout to the game window as it is *now*.
 
-        The replacement for the deleted auto-follow: the overlay no longer re-anchors
-        itself when the game window moves, so this is the button that makes a moved window
-        recoverable, and the one that undoes the position arrows. It also applies an edited
-        anchor or minimap rectangle without a restart, because it saves the form first and
-        hands those settings to the running readout.
+        The replacement for the deleted auto-follow, and the reason the player asked for it:
+        they move the game window while playing, the readout stays where the client used to
+        be, and nothing used to bring it back. This measures the client again, applies the
+        settings in 顯示位置 to *that* rectangle, and clears the arrows' live adjustment so
+        the result is the configured position and nothing else. Editing the anchor or the
+        minimap numbers takes effect here too, without a restart.
         """
         if controller is None:
             return

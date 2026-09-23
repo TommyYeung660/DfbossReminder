@@ -14,7 +14,7 @@ import pytest
 from dfbossreminder import app
 from dfbossreminder.domain.geometry import Block
 from dfbossreminder.domain.settings import Settings, parse_settings
-from dfbossreminder.services.window import Rect
+from dfbossreminder.services.window import GameWindow, Rect
 from dfbossreminder.ui.panel import Row
 
 PROFILE = {"gpscoords": ["1057", "1017"], "override": {"account_name": "tommy660"}}
@@ -646,11 +646,14 @@ class ThreadRecordingPresenter:
         return None
 
     adjustment: tuple[int, int] = (0, 0)
+    adopted: GameWindow | None = None
 
-    def reposition(self, settings=None, nudge=None):  # noqa: ANN001
+    def reposition(self, settings=None, nudge=None, window=None):  # noqa: ANN001
         self.realigned.append((settings, nudge))
         if nudge is not None:
             self.adjustment = tuple(nudge)
+        if window is not None:
+            self.adopted = window
         return "moved to (10, 20)"
 
     def close(self) -> None:
@@ -678,6 +681,12 @@ def controller_rig(monkeypatch) -> tuple:  # noqa: ANN001
 
     monkeypatch.setattr(app, "make_presenter", fake_make_presenter)
     monkeypatch.setattr(app, "ProfilerClient", lambda base: FakeClient())
+    # A game window the re-measuring path can find by default; tests that care about the
+    # move (or about it being gone) replace it.
+    state["found"] = app.GameWindow(hwnd=1, pid=1, title="Dead Frontier",
+                                    client=Rect(100, 100, 1280, 720),
+                                    screen=Rect(0, 0, 1920, 1080), exclusive_fullscreen=False)
+    monkeypatch.setattr(app, "find_game_window", lambda: state["found"])
     controller = app.OverlayController(Path("/nonexistent/settings.json"), log=lambda *_a: None)
     return controller, state, made
 
@@ -784,6 +793,52 @@ def test_realign_puts_the_readout_back_at_the_configured_position(monkeypatch) -
     assert nudge_used == (0, 0), "and the arrows' adjustment is dropped"
     assert state["presenter"].adjustment == (0, 0)
     assert controller.watch.settings.offset_x == 30, "the running loop adopted them"
+    controller.stop()
+
+
+def test_realign_measures_the_game_window_again(monkeypatch) -> None:
+    # The player's own reason for this button: they move the game window while playing, the
+    # readout stays where the client used to be, and this is what brings it back. Without
+    # the re-measure it recomputed the corner from the rectangle captured at start - i.e.
+    # it put the readout back on the old position and changed nothing.
+    controller, state, _made = controller_rig(monkeypatch)
+    started_with = app.GameWindow(hwnd=1, pid=1, title="Dead Frontier",
+                                  client=Rect(100, 100, 1280, 720),
+                                  screen=Rect(0, 0, 1920, 1080), exclusive_fullscreen=False)
+    moved_to = app.GameWindow(hwnd=1, pid=1, title="Dead Frontier",
+                              client=Rect(400, 300, 1280, 720),
+                              screen=Rect(0, 0, 1920, 1080), exclusive_fullscreen=False)
+    state["found"] = started_with
+    settings = parse_settings({"user_id": "14008279"})
+    controller.start(settings)
+    state["found"] = moved_to                      # the player moved the game window
+    ok, _message = controller.realign(settings)
+    controller.watch._drain_requests()
+    assert ok
+    assert state["presenter"].adopted is moved_to, "it re-measured instead of reusing the old"
+
+    # And the arrows must NOT re-measure: a nudge is about the readout, not the client.
+    state["found"] = started_with
+    controller.nudge = controller.nudge            # (the method, not the adjustment)
+    controller.nudge(settings, "right", 5)
+    controller.watch._drain_requests()
+    assert state["presenter"].adopted is moved_to, "the arrows left the game window alone"
+    controller.stop()
+
+
+def test_realign_says_so_when_the_game_window_has_gone(monkeypatch) -> None:
+    # Closing the game and pressing the button must report it, not move the readout
+    # somewhere arbitrary.
+    controller, state, _made = controller_rig(monkeypatch)
+    state["found"] = app.GameWindow(hwnd=1, pid=1, title="Dead Frontier",
+                                    client=Rect(100, 100, 1280, 720),
+                                    screen=Rect(0, 0, 1920, 1080), exclusive_fullscreen=False)
+    settings = parse_settings({"user_id": "14008279"})
+    controller.start(settings)
+    state["found"] = None
+    ok, message = controller.realign(settings)
+    controller.watch._drain_requests()
+    assert not ok and "找不到" in message
     controller.stop()
 
 
