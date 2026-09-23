@@ -36,6 +36,19 @@ from ..domain.settings import (
     to_dict,
 )
 
+# The window is in Traditional Chinese, like the readout's own labels, because the person
+# who asked for the tool reads Chinese. The identifiers the settings file and the command
+# line use are left alone - ``below-minimap`` and ``console`` stay as they are - so the
+# window and the flags keep naming the same thing.
+COLOUR_LABELS = {
+    "list": "一般 boss",
+    "big": "大型 boss",
+    "title": "標題",
+    "note": "附註",
+    "background": "背景",
+    "border": "邊框",
+}
+
 # A whitelist entry's radius, in blocks. Bounded because a radius of 500 watches the
 # whole map and is far more likely to be a typo than an intention.
 MAX_RADIUS = 40
@@ -190,26 +203,42 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
 
     Returns 0 when the window is closed, 1 when tkinter is unavailable (a Python
     without it is a real install) - the message says which.
+
+    Every label is Traditional Chinese. The values the settings file and the command line
+    use are not translated: a combobox still shows ``below-minimap``, because that is the
+    word the flags and the docs use for the same thing.
     """
     try:
         import tkinter as tk
         from tkinter import colorchooser, messagebox, ttk
     except ImportError as error:                     # pragma: no cover - needs a display
-        log(f"this Python has no tkinter, so the settings window cannot open ({error}).\n"
-            f"Edit {path} directly, or use the command-line options.")
+        log(f"這個 Python 沒有 tkinter，所以設定視窗開不起來（{error}）。\n"
+            f"請直接編輯 {path}，或改用命令列選項。")
         return 1
 
     settings = load()
 
     root = tk.Tk()
-    root.title("DFBossReminder settings")
-    root.geometry("720x760")
-    root.minsize(640, 560)
+    root.title("DFBossReminder 設定")
+    # Tall enough to show the buttons without scrolling, but never taller than the screen:
+    # the window has a scrollbar, and one that opens taller than the display is worse than
+    # one that needs a scroll. The screen is asked, not assumed - the game PC is 1080 high
+    # and the machine it gets developed on is not.
+    root.update_idletasks()
+    height = max(560, min(940, root.winfo_screenheight() - 90))
+    root.geometry(f"780x{height}")
+    root.minsize(680, 560)
 
     # Packed before the canvas: the canvas expands to fill, so anything packed after
     # it gets no space at all and the status line would never be visible.
-    status = ttk.Label(root, text=f"settings file: {path}", foreground="#444444")
+    status = ttk.Label(root, text=f"設定檔：{path}", foreground="#444444")
     status.pack(side="bottom", fill="x", padx=12, pady=6)
+
+    # The buttons live outside the scrolling area, for the same reason: the form is taller
+    # than any screen, and an action you have to scroll to find reads as a missing one.
+    # The frame is packed here and filled in below, where the callbacks exist.
+    actions = ttk.Frame(root, padding=(12, 6))
+    actions.pack(side="bottom", fill="x")
 
     canvas = tk.Canvas(root, highlightthickness=0)
     scrollbar = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
@@ -251,21 +280,21 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
                      state="readonly", width=18).pack(side="left")
 
     # ---------------------------------------------------------------- account
-    account = section("Account and range")
-    entry(account, "Dead Frontier user id", "user_id", value=settings.user_id)
-    entry(account, "Nearby radius (blocks)", "radius_blocks", value=settings.radius_blocks)
-    entry(account, "Boss map base url", "base_url", width=34, value=settings.base_url)
-    entry(account, "Refresh every (seconds)", "poll_seconds", value=settings.poll_seconds)
-    entry(account, "Mark stale after (seconds)", "stale_seconds", value=settings.stale_seconds)
-    check(account, "Also show mission spawns", "include_missions", settings.include_missions)
-    check(account, "List every boss when the position is unknown",
+    account = section("帳號與範圍")
+    entry(account, "Dead Frontier 使用者 ID", "user_id", value=settings.user_id)
+    entry(account, "附近半徑（格）", "radius_blocks", value=settings.radius_blocks)
+    entry(account, "Boss 地圖網址", "base_url", width=34, value=settings.base_url)
+    entry(account, "更新間隔（秒）", "poll_seconds", value=settings.poll_seconds)
+    entry(account, "幾秒後視為過期", "stale_seconds", value=settings.stale_seconds)
+    check(account, "同時顯示任務生成的 boss", "include_missions", settings.include_missions)
+    check(account, "位置不明時列出所有 boss",
           "show_all_without_player", settings.show_all_without_player)
 
     # -------------------------------------------------------------- whitelist
-    whitelist = section("Whitelist")
-    check(whitelist, "Whitelist mode: show only these coordinates",
+    whitelist = section("白名單")
+    check(whitelist, "白名單模式：只顯示這些座標",
           "whitelist_mode", settings.whitelist_mode)
-    ttk.Label(whitelist, text="x        y       radius   label          ",
+    ttk.Label(whitelist, text="x        y       半徑     標籤           ",
               font=("Consolas", 9)).pack(anchor="w")
     table = ttk.Frame(whitelist)
     table.pack(fill="x")
@@ -286,29 +315,28 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
 
         row_record = {"cells": cells, "frame": line}
         whitelist_rows.append(row_record)
-        ttk.Button(line, text="remove", width=8, command=remove).pack(side="left", padx=4)
+        ttk.Button(line, text="移除", width=8, command=remove).pack(side="left", padx=4)
 
     for existing in form_from_settings(settings)["whitelist"]:
         add_whitelist_row(existing)
-    ttk.Button(whitelist, text="Add a coordinate", command=add_whitelist_row).pack(anchor="w", pady=4)
-    ttk.Label(whitelist, text="radius 0 watches exactly that cell; radius 2 also watches "
-                              "the two blocks around it.",
+    ttk.Button(whitelist, text="新增座標", command=add_whitelist_row).pack(anchor="w", pady=4)
+    ttk.Label(whitelist, text="半徑 0 只監看那一格；半徑 2 連周圍兩格一起監看。",
               foreground="#666666").pack(anchor="w")
 
     # ------------------------------------------------------------- appearance
-    appearance = section("Readout appearance")
-    entry(appearance, "Font size (px)", "font_size", value=settings.font_size)
-    entry(appearance, "Font weight (100-900)", "font_weight", value=settings.font_weight)
-    entry(appearance, "Font face (blank = pick one)", "font_face", width=24,
+    appearance = section("顯示外觀")
+    entry(appearance, "字體大小（px）", "font_size", value=settings.font_size)
+    entry(appearance, "字體粗細（100-900）", "font_weight", value=settings.font_weight)
+    entry(appearance, "字體（留空＝自動選擇）", "font_face", width=24,
           value=settings.font_face)
-    entry(appearance, "Background opacity (0 = see-through)", "opacity", value=settings.opacity)
-    check(appearance, "Dark shadow behind the text (for a transparent backing)",
+    entry(appearance, "背景不透明度（0＝全透明）", "opacity", value=settings.opacity)
+    check(appearance, "文字加深色陰影（透明底時使用）",
           "text_shadow", settings.text_shadow)
-    choice(appearance, "Language of the labels", "language", LANGUAGES, settings.language)
-    entry(appearance, "Width (px)", "width", value=settings.width)
-    entry(appearance, "Height (px)", "height", value=settings.height)
-    entry(appearance, "Max rows", "max_rows", value=settings.max_rows)
-    choice(appearance, "Bearing words in console", "direction_style", DIRECTION_STYLES,
+    choice(appearance, "標籤語言", "language", LANGUAGES, settings.language)
+    entry(appearance, "寬度（px）", "width", value=settings.width)
+    entry(appearance, "高度（px，最大值）", "height", value=settings.height)
+    entry(appearance, "最多列數", "max_rows", value=settings.max_rows)
+    choice(appearance, "主控台方位用詞", "direction_style", DIRECTION_STYLES,
            settings.direction_style)
 
     colours_frame = ttk.Frame(appearance)
@@ -316,8 +344,9 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
     colour_vars = dict(settings.colour_map)
 
     def pick_colour(key: str, swatch: tk.Label) -> None:
-        _rgb, chosen = colorchooser.askcolor(color=colour_vars.get(key, "#FFFFFF"),
-                                             title=f"Colour: {key}")
+        _rgb, chosen = colorchooser.askcolor(
+            color=colour_vars.get(key, "#FFFFFF"),
+            title=f"選擇顏色：{key}（{COLOUR_LABELS.get(key, key)}）")
         if chosen:
             colour_vars[key] = chosen.upper()
             swatch.configure(background=colour_vars[key], text=colour_vars[key])
@@ -325,31 +354,32 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
     for key in COLOUR_KEYS:
         line = ttk.Frame(colours_frame)
         line.pack(fill="x", pady=1)
-        ttk.Label(line, text=key, width=12).pack(side="left")
+        ttk.Label(line, text=f"{key}（{COLOUR_LABELS.get(key, key)}）",
+                  width=20).pack(side="left")
         swatch = tk.Label(line, text=colour_vars.get(key, DEFAULT_COLOURS.get(key, "#FFFFFF")),
                           background=colour_vars.get(key, DEFAULT_COLOURS.get(key, "#FFFFFF")),
                           width=12)
         swatch.pack(side="left", padx=4)
-        ttk.Button(line, text="choose", width=9,
+        ttk.Button(line, text="選擇", width=9,
                    command=lambda k=key, s=swatch: pick_colour(k, s)).pack(side="left")
 
     # ---------------------------------------------------------------- placement
-    placement = section("Placement")
-    choice(placement, "Where to draw", "presentation", PRESENTATIONS, settings.presentation)
-    choice(placement, "Anchor", "anchor", ANCHORS, settings.anchor)
-    entry(placement, "Anchor inset x", "offset_x", value=settings.offset_x)
-    entry(placement, "Anchor inset y", "offset_y", value=settings.offset_y)
-    ttk.Label(placement, text="below-minimap uses the region minimap's rectangle, in "
-                              "client coordinates:").pack(anchor="w", pady=(6, 0))
-    entry(placement, "Minimap left", "minimap_left", value=settings.minimap_left)
-    entry(placement, "Minimap top", "minimap_top", value=settings.minimap_top)
-    entry(placement, "Minimap size", "minimap_size", value=settings.minimap_size)
-    entry(placement, "Gap below the minimap", "minimap_gap", value=settings.minimap_gap)
+    placement = section("顯示位置")
+    choice(placement, "顯示方式", "presentation", PRESENTATIONS, settings.presentation)
+    choice(placement, "對齊位置", "anchor", ANCHORS, settings.anchor)
+    entry(placement, "對齊位移 x", "offset_x", value=settings.offset_x)
+    entry(placement, "對齊位移 y", "offset_y", value=settings.offset_y)
+    ttk.Label(placement, text="below-minimap 用小地圖的矩形，座標是客戶區座標：").pack(
+        anchor="w", pady=(6, 0))
+    entry(placement, "小地圖 left", "minimap_left", value=settings.minimap_left)
+    entry(placement, "小地圖 top", "minimap_top", value=settings.minimap_top)
+    entry(placement, "小地圖 size", "minimap_size", value=settings.minimap_size)
+    entry(placement, "小地圖下方間距", "minimap_gap", value=settings.minimap_gap)
 
     # ------------------------------------------------------------- big bosses
-    big = section("Big / ultra bosses (shown with their end time)")
-    ttk.Label(big, text="One name per line. The boss map publishes no tier, so this list\n"
-                        "is what decides which bosses get the end-time format.",
+    big = section("大型／終極 boss（顯示結束時間）")
+    ttk.Label(big, text="一行一個名稱。boss 地圖沒有分級欄位，所以由這份清單決定\n"
+                        "哪些 boss 用結束時間的格式顯示。",
               justify="left").pack(anchor="w")
     big_box = tk.Text(big, height=6, width=40)
     big_box.insert("1.0", "\n".join(settings.big_bosses or DEFAULT_BIG_BOSSES))
@@ -373,19 +403,19 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
         try:
             save(new_settings)
         except OSError as error:
-            messagebox.showerror("DFBossReminder", f"could not save:\n{error}")
+            messagebox.showerror("DFBossReminder", f"無法儲存：\n{error}")
             return
-        message = f"saved to {path}"
+        message = f"已儲存至 {path}"
         if notes:
-            message += "\n\nadjusted before saving:\n  " + "\n  ".join(notes)
+            message += "\n\n儲存前已調整：\n  " + "\n  ".join(notes)
         if new_settings.user_id != payload["user_id"]:
-            message += ("\n\nNote: the user id must be digits (like 14008279); "
-                        "the previous valid value was kept.")
+            message += ("\n\n注意：使用者 ID 必須是數字（例如 14008279），"
+                        "已保留先前有效的值。")
         status.configure(text=message.splitlines()[0])
         messagebox.showinfo("DFBossReminder", message)
 
     def do_reload() -> None:
-        if not messagebox.askyesno("DFBossReminder", "Reload from the file and discard changes?"):
+        if not messagebox.askyesno("DFBossReminder", "要從檔案重新載入，放棄目前的修改嗎？"):
             return
         fresh = form_from_settings(load())
         for key, value in fresh.items():
@@ -402,14 +432,12 @@ def run_config(path: Path, load, save, log=print) -> int:  # noqa: ANN001
             add_whitelist_row(existing)
         big_box.delete("1.0", "end")
         big_box.insert("1.0", fresh["big_bosses"])
-        status.configure(text=f"reloaded from {path}")
+        status.configure(text=f"已從 {path} 重新載入")
 
-    buttons = ttk.Frame(body)
-    buttons.pack(fill="x", pady=8)
-    ttk.Button(buttons, text="Save", command=do_save).pack(side="left")
-    ttk.Button(buttons, text="Reload", command=do_reload).pack(side="left", padx=8)
-    ttk.Button(buttons, text="Close", command=root.destroy).pack(side="left")
-    ttk.Label(buttons, text="  the overlay reads this file on its next start",
+    ttk.Button(actions, text="儲存", command=do_save).pack(side="left")
+    ttk.Button(actions, text="重新載入", command=do_reload).pack(side="left", padx=8)
+    ttk.Button(actions, text="關閉", command=root.destroy).pack(side="left")
+    ttk.Label(actions, text="（overlay 下次啟動時才會讀取這個檔案）",
               foreground="#666666").pack(side="left")
 
     root.mainloop()

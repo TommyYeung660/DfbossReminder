@@ -481,6 +481,17 @@ class Overlay:
             self.gdi32.DeleteDC(self.mem_dc)
             self.mem_dc = 0
 
+    @property
+    def title_band(self) -> int:
+        """The space held above the first row: the title, or just a top margin.
+
+        An empty title means there is no title band at all. The readout the player sees
+        is a bare list of bosses, and reserving a title-sized gap above it would leave a
+        strip of nothing at the top of the window - which is visible, because the window
+        is auto-sized to its content and anchored by its top edge.
+        """
+        return self.title_height + 3 if self._title else 2
+
     def height_for(self, rows: int) -> int:
         """The window height these rows need, so the content is never clipped.
 
@@ -488,7 +499,7 @@ class Overlay:
         were the first thing to go, which is the worst thing to lose, because the notes
         are what tell a correct empty list apart from a broken one.
         """
-        return self.title_height + rows * self.line_height + 5
+        return self.title_band + rows * self.line_height + 2
 
     def resize(self, left: int, top: int, width: int, height: int) -> None:
         """Reposition and resize without activating, rebuilding the surface.
@@ -530,11 +541,15 @@ class Overlay:
         extras would be silently dropped at draw time, which is the kind of quiet
         truncation this project keeps paying for.
         """
-        available = self.height - self.title_height - 5
+        available = self.height - self.title_band - 2
         return max(1, available // self.line_height)
 
     def set_content(self, title: str, rows: tuple[Row, ...]) -> None:
-        """Remember what to draw and present it."""
+        """Remember what to draw and present it.
+
+        An empty title draws no title and no title band: the readout is then a bare list
+        of rows, which is what the in-game window shows.
+        """
         self._title = title
         self._rows = tuple(rows)
         self.present()
@@ -582,14 +597,19 @@ class Overlay:
         for y in range(self.height):
             self._put(0, y, self.border, 170)
             self._put(self.width - 1, y, self.border, 170)
+        if not self._title:
+            # Nothing to underline, and the rule would land on the top border.
+            return
         for x in range(3, self.width - 3):
             self._put(x, self.title_height - 2, self.title_colour, 150)
 
     def _draw_text(self) -> None:
         self.gdi32.SelectObject(self.mem_dc, self.font)
         flags = ALIGN_FLAGS[self.align] | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS
-        self._text(self._title, 8, 2, self.width - 8, self.title_height, self.title_colour, flags)
-        y = self.title_height + 3
+        if self._title:
+            self._text(self._title, 8, 2, self.width - 8, self.title_height,
+                       self.title_colour, flags)
+        y = self.title_band
         for row in self._rows:
             if y + self.line_height > self.height - 2:
                 break
@@ -612,7 +632,7 @@ class Overlay:
         """
         if self.framed:
             return          # the backing already put 255 in the alpha byte
-        for y in range(max(0, self.title_height - 2), self.last_text_y + 1):
+        for y in range(max(0, self.title_band - 2), self.last_text_y + 1):
             base = y * self.width * 4
             row = (ctypes.c_ubyte * (self.width * 4)).from_address(self.bits + base)
             for x in range(self.width):

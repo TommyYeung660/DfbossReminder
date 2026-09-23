@@ -141,6 +141,34 @@ def test_the_window_class_is_released_with_the_window() -> None:
     assert body.index("DestroyWindow") < body.index("UnregisterClassW")
 
 
+def test_an_empty_title_leaves_no_band_above_the_rows() -> None:
+    # The in-game window draws no title, and the window is auto-sized and anchored by its
+    # top edge, so reserving a title-sized gap would show as a strip of nothing. The band
+    # is the title or a two-pixel margin, and it is what the height and the row count are
+    # derived from.
+    class FakeOverlay:
+        title_height = 18
+
+    fake = FakeOverlay()
+    fake._title = ""
+    assert panel_module.Overlay.title_band.fget(fake) == 2
+    fake._title = "DFBossReminder  1057,1017  3 個附近"
+    assert panel_module.Overlay.title_band.fget(fake) == 21
+    # Both the height and the row count have to follow the band, not the title height:
+    # with a title-sized reserve left in, the last row would be clipped.
+    assert "return self.title_band + rows * self.line_height + 2" in PANEL_SOURCE
+    assert "available = self.height - self.title_band - 2" in PANEL_SOURCE
+    assert "y = self.title_band" in PANEL_SOURCE
+    assert "if self._title:" in PANEL_SOURCE
+
+
+def test_the_title_rule_is_not_drawn_without_a_title() -> None:
+    # It would land on the top border of an opaque panel.
+    body = PANEL_SOURCE[PANEL_SOURCE.index("    def _outline("):]
+    body = body[:body.index("\ndef ")]
+    assert body.index("if not self._title:") < body.index("self.title_height - 2")
+
+
 def test_the_weight_is_reported_because_it_is_only_a_request() -> None:
     # The client's HUD font ships one face (OS/2 usWeightClass 400, subfamily
     # "Regular"), so there is no lighter outline for 300 to select. GDI nonetheless

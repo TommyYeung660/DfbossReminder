@@ -1,0 +1,5 @@
+settings saved to C:\Users\tommy.yeung\.dfbossreminder\settings.json
+DFBossReminder 0.1.0 - overlay visible=True at (1347,309)-(1687,729); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA; F8 toggles whitelist mode
+fetched 14 boss events; player 1057,1017
+overlay surface written to C:\DFTools\DfbossReminder\tools\pc\..\..\tools\pc\evidence\overlay.bmp; overlay visible=True at (1347,309)-(1687,418); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; anchored to the game client; using the game's own font: VIPER NORA; F8 toggles whitelist mode
+fetched 14 boss events; player 1057,1017

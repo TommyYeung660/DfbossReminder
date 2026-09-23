@@ -370,6 +370,55 @@ def test_a_half_typed_whitelist_row_is_dropped_rather_than_saved_as_a_coordinate
     assert payload["whitelist"][0]["radius"] == 1
 
 
+# ------------------------------------------------- the settings window's language
+
+
+def test_every_settings_window_label_is_chinese() -> None:
+    # The window was in English while the readout and the console were Chinese. The
+    # identifiers the settings file and the flags use stay English on purpose, so this
+    # checks the labels around them rather than forbidding ASCII outright.
+    import re
+    from pathlib import Path
+
+    from dfbossreminder.ui import config_gui
+
+    source = Path(config_gui.__file__).read_text(encoding="utf-8")
+    body = source[source.index("def run_config("):]
+    where = {"section()": r'section\("([^"]*)"',
+             "entry()": r'entry\([\w.]+,\s*"([^"]*)"',
+             "check()": r'check\([\w.]+,\s*"([^"]*)"',
+             "choice()": r'choice\([\w.]+,\s*"([^"]*)"',
+             "a widget label": r'\btext="([^"]*)"'}
+    checked = 0
+    for name, pattern in where.items():
+        for label in re.findall(pattern, body):
+            assert re.search(r"[\u4e00-\u9fff]", label), \
+                f"{name} label is not Chinese: {label!r}"
+            checked += 1
+    assert checked >= 25, f"only {checked} labels found: the patterns must have gone stale"
+    # The dialogs and the window title too - a Chinese window with an English error box
+    # is the same half-finished job. Only the *label* slots are checked, so identifiers
+    # and function names are none of this test's business. The dialog titles stay the
+    # product name, which is not translated in the console either.
+    for name, pattern in {"a dialog message": r'messagebox\.\w+\("[^"]*",\s*\n?\s*f?"([^"]*)"',
+                          "the window title": r'root\.title\("([^"]*)"',
+                          "the status line": r'status\.configure\(text=f?"([^"]*)"'}.items():
+        found = re.findall(pattern, body)
+        assert found, f"no strings matched for {name}"
+        for label in found:
+            assert re.search(r"[\u4e00-\u9fff]", label), \
+                f"{name} is not Chinese: {label!r}"
+
+
+def test_every_colour_in_the_window_has_a_chinese_name() -> None:
+    from dfbossreminder.domain.settings import COLOUR_KEYS
+    from dfbossreminder.ui.config_gui import COLOUR_LABELS
+
+    assert set(COLOUR_LABELS) == set(COLOUR_KEYS), (
+        "a colour with no label would show its raw key in the window")
+    assert all(label.strip() for label in COLOUR_LABELS.values())
+
+
 # ------------------------------------------------- the readout sizes itself
 
 
@@ -429,12 +478,94 @@ def test_rows_over_the_maximum_height_are_reported_not_dropped_silently() -> Non
 
 
 def test_the_last_row_is_never_the_one_that_disappears() -> None:
-    # The notes are the last rows, and they are what says whether an empty readout is
-    # correct; a trim that lost them would hide the explanation.
+    # The rows at the end are the ones that say whether an empty readout is correct; a
+    # trim that lost them would hide the explanation.
     presenter = presenter_with(4)
     rows = (Row("boss"), Row("boss"), Row("waypoint"), Row("10 格內"), Row("已更新 0 秒前"))
     kept = presenter._fit(rows, parse_settings({"height": presenter.overlay.height}))
     assert "未顯示" in kept[-1].text
+
+
+def test_the_overlay_is_drawn_without_a_title_line() -> None:
+    # The player asked for the header to go: the window over the game is the list, and
+    # nothing above it. The console still prints the header (view.console_lines).
+    plan = live_plan()
+    presenter = presenter_with(20)
+    presenter.draw(plan, parse_settings({}), "tommy660", "已更新 0 秒前", False)
+    assert presenter.overlay.title == ""
+    assert all("DFBossReminder" not in row.text for row in presenter.overlay.rows)
+
+
+def test_the_overlay_draws_the_bosses_without_the_waypoint_notes_or_age() -> None:
+    plan = live_plan()
+    presenter = presenter_with(20)
+    settings = parse_settings({})
+    presenter.draw(plan, settings, "tommy660", "已更新 0 秒前", False)
+    texts = [row.text for row in presenter.overlay.rows]
+    assert any("Bandits" in text for text in texts), "the boss must still be there"
+    assert not any("Secronom Bunker" in text for text in texts)
+    assert not any("格內" in text for text in texts)
+    assert not any("已更新" in text for text in texts)
+
+
+def live_plan():  # noqa: ANN202
+    """A real plan for the fixture payload, so the row rules are exercised end to end."""
+    from dfbossreminder.domain.bosses import parse_bossmap
+    from dfbossreminder.domain.geometry import Block
+    from dfbossreminder.domain.plan import build_plan
+
+    settings = parse_settings({"radius_blocks": 5})
+    events = parse_bossmap(BOSS, now=1000.0)
+    return build_plan(events, Block(1057, 1017), settings, now=1000.0)
+
+
+def test_constructing_the_presenter_takes_the_toggle_hotkey(monkeypatch) -> None:
+    # This call used to sit after a `return` inside the font method, so the documented F8
+    # toggle was dead code while the ledger called it verified. The presenter is built the
+    # way the tool builds it - not through __new__ - which is what catches that.
+    calls: list[str] = []
+
+    class StubOverlay:
+        def __init__(self, *args, **kwargs) -> None:      # noqa: ANN002, ANN003
+            self.left = self.top = self.height = 0
+
+        def register_hotkey(self, key: str, ident: int = 1) -> bool:
+            calls.append(key)
+            return True
+
+        def set_face(self, face: str) -> None:
+            return None
+
+    window = type("W", (), {"client": Rect(0, 0, 1280, 720), "exclusive_fullscreen": False})()
+    monkeypatch.setattr(app, "Overlay", StubOverlay)
+    monkeypatch.setattr(app, "game_window_or_refuse", lambda log: window)
+    settings = parse_settings({"hotkey": "F6"})
+    # Built the way the tool builds it, settings.hotkey included: the presenter takes the
+    # key as an argument, so a caller that forgets it would silently fall back to F8.
+    presenter = app.OverlayPresenter(settings, True, hotkey=settings.hotkey,
+                                     log=lambda *a: None)
+    assert calls == ["F6"]
+    assert presenter.hotkey_registered is True
+    assert "F6 toggles whitelist mode" in presenter.notes
+
+
+def test_a_hotkey_that_cannot_be_taken_is_reported_not_swallowed(monkeypatch) -> None:
+    class RefusingOverlay:
+        def __init__(self, *args, **kwargs) -> None:      # noqa: ANN002, ANN003
+            self.left = self.top = self.height = 0
+
+        def register_hotkey(self, key: str, ident: int = 1) -> bool:
+            return False
+
+        def set_face(self, face: str) -> None:
+            return None
+
+    window = type("W", (), {"client": Rect(0, 0, 1280, 720), "exclusive_fullscreen": False})()
+    monkeypatch.setattr(app, "Overlay", RefusingOverlay)
+    monkeypatch.setattr(app, "game_window_or_refuse", lambda log: window)
+    presenter = app.OverlayPresenter(parse_settings({}), True, log=lambda *a: None)
+    assert presenter.hotkey_registered is False
+    assert "could NOT register F8 as a hotkey" in presenter.notes
 
 
 def test_the_hotkey_is_configurable_because_f8_is_not_always_free() -> None:

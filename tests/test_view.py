@@ -155,6 +155,33 @@ def test_the_notes_follow_the_rows_in_the_note_colour() -> None:
     assert rows[-1].colour == settings.colour("note")
 
 
+def test_the_overlay_rows_are_the_bosses_and_nothing_else() -> None:
+    # The player asked for the in-game window to be the boss list only: not the waypoint,
+    # not the notes, not the age. The console keeps all of it, because that is the one
+    # place left that tells an empty list apart from a broken feed.
+    plan = plan_for([{"name": "6 x Bandits", "blocks": [(1001, 1000)]}], Block(1000, 1000),
+                    radius_blocks=10)
+    settings = parse_settings({"radius_blocks": 10})
+    overlay = [row.text for row in
+               view.rows_for(plan, settings, "已更新 1 秒前", False, extras=False)]
+    assert overlay == ["6 x Bandits | 1001 x 1000 | 1R"]
+    full = [row.text for row in view.rows_for(plan, settings, "已更新 1 秒前", False)]
+    assert full[0] == overlay[0], "the bosses come first in both"
+    assert len(full) > len(overlay), "the console keeps what the overlay drops"
+    assert any("Secronom Bunker" in text for text in full)
+    assert any("10 格內" in text for text in full)
+    assert full[-1] == "已更新 1 秒前"
+
+
+def test_the_overlay_is_empty_when_there_are_no_bosses() -> None:
+    # An empty overlay is an empty window: honest, and the reason the console keeps the
+    # notes. Nothing is invented to fill the space.
+    plan = plan_for([], Block(1000, 1000), radius_blocks=1)
+    settings = parse_settings({"radius_blocks": 1})
+    assert view.rows_for(plan, settings, "已更新 0 秒前", False, extras=False) == ()
+    assert view.rows_for(plan, settings, "已更新 0 秒前", False) != ()
+
+
 def test_the_labels_are_chinese_by_default_and_english_when_asked() -> None:
     plan = plan_for([{"name": "6 x Bandits", "blocks": [(1001, 1000)]}], Block(1000, 1000),
                     radius_blocks=10)
@@ -246,3 +273,22 @@ def test_the_console_form_is_the_same_content_as_plain_text() -> None:
     lines = view.console_lines(plan, parse_settings({"radius_blocks": 10}), "updated 0s ago", False)
     assert lines[0].startswith("DFBossReminder")
     assert any("6 x Bandits | 1001 x 1000 | 1R" in line for line in lines)
+
+
+def test_the_console_keeps_the_title_and_everything_the_overlay_drops() -> None:
+    # The overlay is now a bare list, so the console is the only place that answers "is
+    # this empty because there are no bosses, or because the feed is down". It has to
+    # keep the header, the waypoint, the notes and the age.
+    plan = plan_for([{"name": "6 x Bandits", "blocks": [(1001, 1000)]}], Block(1000, 1000),
+                    radius_blocks=10)
+    settings = parse_settings({"radius_blocks": 10})
+    lines = view.console_lines(plan, settings, "已更新 1 秒前", False)
+    assert lines[0].startswith("DFBossReminder")            # the header
+    assert any("Secronom Bunker" in line for line in lines)  # the waypoint
+    assert any("10 格內" in line for line in lines)          # the radius note
+    assert any("已更新 1 秒前" in line for line in lines)     # the age
+    overlay = [row.text for row in
+               view.rows_for(plan, settings, "已更新 1 秒前", False, extras=False)]
+    # Every overlay row is in the console rendering, so the two never disagree.
+    for text in overlay:
+        assert any(text in line for line in lines), text

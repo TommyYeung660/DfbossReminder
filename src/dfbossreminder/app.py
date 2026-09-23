@@ -273,6 +273,7 @@ class OverlayPresenter:
         # running has nothing to say. This raises GameNotRunning, which main reports.
         self.window = game_window_or_refuse(log)
         self._place(self._area())
+        self._register_hotkey()
 
     def _area(self) -> tuple[Rect, str]:
         """The rectangle to anchor to, and a note about which one it was."""
@@ -349,29 +350,43 @@ class OverlayPresenter:
             return ""
         self.notes.append(f"using the game's own font: {face}")
         return face
-        if self.hotkey_name:
-            # Reported either way, because "the toggle works" is a claim that needs a
-            # record: a silent failure here looks exactly like a hotkey nobody pressed.
-            self.hotkey_registered = self.overlay.register_hotkey(self.hotkey_name, TOGGLE_HOTKEY_ID)
-            self.notes.append(f"{self.hotkey_name} toggles whitelist mode"
-                              if self.hotkey_registered
-                              else f"could NOT register {self.hotkey_name} as a hotkey")
+
+    def _register_hotkey(self) -> None:
+        """Take the whitelist toggle key, and record which way it went.
+
+        Reported either way, because "the toggle works" is a claim that needs a record:
+        a silent failure here looks exactly like a hotkey nobody pressed. This used to
+        sit at the end of :meth:`_game_font_face`, after its ``return``, which made it
+        dead code - the toggle was documented and never registered.
+        """
+        if not self.hotkey_name or self.overlay is None:
+            return
+        self.hotkey_registered = self.overlay.register_hotkey(self.hotkey_name, TOGGLE_HOTKEY_ID)
+        self.notes.append(f"{self.hotkey_name} toggles whitelist mode"
+                          if self.hotkey_registered
+                          else f"could NOT register {self.hotkey_name} as a hotkey")
 
     def draw(self, plan: Plan, settings: Settings, account: str, status: str, stale: bool) -> None:
         self.settings = settings
         if self.overlay is None:
             return
-        rows: tuple[Row, ...] = view.rows_for(plan, settings, status, stale)
+        # Bosses only, and no title line: the window over the game is the list the player
+        # reads while playing. The waypoints, the notes, the age and the header are all
+        # still drawn by the console presentation (view.console_lines), which is where
+        # "is this empty because there are no bosses or because the feed is down" is
+        # answered.
+        rows: tuple[Row, ...] = view.rows_for(plan, settings, status, stale, extras=False)
         rows = self._fit(rows, settings)
-        self.overlay.set_content(view.title_line(plan, settings, account), rows)
+        self.overlay.set_content("", rows)
 
     def _fit(self, rows: tuple[Row, ...], settings: Settings) -> tuple[Row, ...]:
         """Size the window to its content, and say so if the maximum clips it.
 
-        A fixed height used to drop the tail of the list, and the tail is the notes -
-        the part that says whether an empty readout is correct or a bug. The window now
-        follows its content up to ``height``, and anything still over that limit is
-        reported on its last line rather than silently vanishing.
+        The window follows its content up to ``height``, and anything still over that
+        limit is reported on its last line rather than silently vanishing. That last line
+        is the one row of "extra" the overlay keeps: it only appears when bosses are
+        actually being hidden, which is exactly the case where silence would be read as
+        "that is the whole list".
         """
         area, _note = self._area()
         height = min(settings.height, self.overlay.height_for(len(rows)))

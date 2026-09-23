@@ -112,6 +112,23 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | **VIPER NORA has no CJK glyphs**, so the Chinese labels cannot be drawn in it - the header and notes would be a row of empty boxes beside boss lines that look perfect. Two faces are kept and each row picks by its content | Recorded live | the render probe drew 個附近 as boxes; the capture shows the Chinese rows in MS Gothic |
 | The readout is right-aligned, so its rows share a right edge with the minimap | Recorded live | the same capture |
 
+### Verified on the game PC, 2026-09-23 (sixth session: the overlay is the boss list only)
+
+The player asked for three changes: no header line in the overlay, nothing below the
+boss rows in it, and a Traditional Chinese settings window.
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| The overlay over the client is **the boss rows and nothing else**: no `DFBossReminder … N 個附近` header, no waypoint line, no notes, no age | Recorded live | `docs/evidence/2026-09-23-overlay-bosses-only-on-client.png` — the minimap reads `1057 X 1017` with seven green rows under it and nothing else |
+| The window also **reserves no band for a title**, so the first row starts two pixels from the top instead of leaving a strip of nothing | Recorded live | the 340×109 surface for seven rows in `…-overlay-bosses-only-surface.png`; `Overlay.title_band` |
+| The **console keeps everything the overlay drops** — the header, the waypoint, the notes and the age — because it is now the only place that tells an empty list apart from a dead feed | Implementation fact | `view.console_lines`, pinned by a test that every overlay row appears in the console rendering |
+| The **settings window is entirely Traditional Chinese** and renders it: no missing-glyph boxes, including the colour rows (`list（一般 boss）`) and the file path at the bottom | Recorded live | `docs/evidence/2026-09-23-settings-window-zh.png` (source run) and `…-settings-window-zh-from-exe.bmp` (the built exe) |
+| Its buttons are **outside the scrolling area**, so 儲存 is reachable without scrolling; the window's initial height is read from the screen rather than assumed | Recorded live | the same captures; `config_gui.run_config` |
+| **The F8 toggle had been dead code since `d409401`**: the registration sat after a `return` inside `_game_font_face`, so it never ran, while the ledger called the hotkey verified. It now registers at startup and the overlay reports it again | Recorded live | `F8 toggles whitelist mode` is back in the run's describe line (`…-overlay-bosses-only-run.txt`), and `tests/test_app.py` builds the presenter for real instead of through `__new__` |
+| `PrintWindow` renders the Tk settings window faithfully with no activation, which is what makes the screenshot possible without taking the player's focus mid-fight | Recorded live | `tools/pc/capture-window.py`; the captures above came from it |
+| Photographing the window **the moment its title appears catches it mid-build** — the bottom third was black, which reads as a layout bug rather than a race | Recorded live (found by looking at the picture) | the first capture of the taller window; the probe now lets it settle for two seconds |
+| Killing the one-file exe's **parent** leaves the settings window running: every exe probe run left one open, and the next run found two windows titled the same | Recorded live | `matched hwnd=0x600702` and `matched hwnd=0x2e07cc` in the same run; `probe-config-gui.stop` now kills the tree with `taskkill /T` |
+
 ### Verified on the game PC, 2026-09-22 (fifth session: font weight and the shadow)
 
 The player asked for `font-weight: 300`, and answering that honestly needed a

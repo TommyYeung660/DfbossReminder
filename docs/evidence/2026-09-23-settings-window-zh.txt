@@ -1,0 +1,9 @@
+starting: C:\Users\tommy.yeung\AppData\Local\Programs\Python\Python313\python.exe C:\DFTools\DfbossReminder\tools\dfboss_config_main.py
+found the settings window: hwnd=0x600702 visible=True (130,130)-(926,1109)
+size: 796 x 979
+matched hwnd=0x600702 796x979 at (130,130) 'DFBossReminder 設定'
+matched hwnd=0x2e07cc 796x979 at (182,182) 'DFBossReminder 設定'
+PrintWindow rendered with render-full-content
+wrote C:\DFTools\DfbossReminder\tools\pc\evidence\20260923T030609Z-window-config-gui.bmp (796x979, 2337906 bytes)
+game running: yes (the settings window must open either way)
+PASS: the settings window opens, with no game required

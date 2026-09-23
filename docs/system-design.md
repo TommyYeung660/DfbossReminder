@@ -249,6 +249,48 @@ This is the general shape of a Windows-only cosmetic setting: the request, the
 recorded value and the drawn pixels are three different things, and only the third is
 what the player sees.
 
+### D17 — The overlay is the answer; the console is the explanation
+
+The window over the game now draws **only the boss rows**: no header, no waypoint, no
+notes, no age, and no reserved band for a title. That is what the player asked for, and
+it is a reasonable thing to want - the header repeats what the minimap already shows and
+the notes are diagnostics, not something to read while fighting.
+
+The risk it creates has to be answered somewhere, because the removed lines were exactly
+the ones that told a correct empty readout from a broken one: "20 格內 / 半徑外 154 個 /
+已更新 0 秒前" is how a person knows the feed is alive. So the split is now explicit:
+
+* the **overlay** is the answer - the list, and nothing else;
+* the **console** is the explanation - the same rows with the header, the notes and the
+  age around them, and it is what `--once`, the runbook and every log show.
+
+Rows are filtered by one flag (`view.rows_for(..., extras=False)`), not by two row
+builders, so the two renderings cannot drift: a test asserts that every overlay row
+appears in the console rendering. One exception survives in the overlay, deliberately:
+the "還有 N 行未顯示" row, which appears only when the maximum height is genuinely
+hiding bosses. Silence there would read as "that is the whole list", which is the one
+misreading the overlay cannot afford.
+
+### D18 — A regression the tests could not see, because they built the object the wrong way
+
+Commit `d409401` moved the font work into `_game_font_face` and left the hotkey
+registration **after one of its `return`s**. The overlay kept working, the ledger kept
+saying "F8 really registers as a global hotkey", and the live runs after that commit
+simply no longer printed the line that would have shown otherwise - nobody was looking
+for its absence.
+
+The unit tests did not catch it either, and that is the interesting part: they build the
+presenter with `OverlayPresenter.__new__(...)` and set the attributes by hand, because
+the real constructor wants a game window and a Windows overlay. `__init__` was therefore
+never executed by any test, so a statement that never runs is invisible to all of them.
+
+Two changes: the registration is its own method called from `__init__`, and a test
+constructs the presenter **the way the tool does** - stub overlay class, stubbed window
+lookup, real constructor - asserting the key was taken and that a refusal is reported
+rather than swallowed. `tools/pc/probe-config-gui.py` and the hotkey probe fill the same
+role on the machine: the line is in the run log, and its absence is now a thing to check
+rather than a detail.
+
 ### D12 — The window follows its content
 
 The height was a fixed setting, and the live run showed it clipping the *notes* at the

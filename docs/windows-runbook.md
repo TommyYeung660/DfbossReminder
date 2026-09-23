@@ -58,10 +58,11 @@
 tools\pc\config-gui.cmd
 ```
 
-或是桌面上的 `DFBossReminderConfig.exe`。它**不需要遊戲在跑**：帳號 id、白名單、
-字級、顏色、擺放位置、以及「那些 boss 算 big boss」的清單都在這裡改。按 Save 會寫入
-`%USERPROFILE%\.dfbossreminder\settings.json`，overlay 下次啟動時讀取；如果某個值被
-工具調整過（例如半徑填 9999 會被夾到 200），視窗會明確列出被改的欄位。
+或是桌面上的 `DFBossReminderConfig.exe`。**界面全部是繁體中文**，而且**不需要遊戲在跑**：
+帳號 id、白名單、字級、顏色、擺放位置、以及「那些 boss 算 big boss」的清單都在這裡改。
+按「儲存」會寫入 `%USERPROFILE%\.dfbossreminder\settings.json`，overlay 下次啟動時讀取；
+如果某個值被工具調整過（例如半徑填 9999 會被夾到 200），視窗會明確列出被改的欄位。
+按鈕固定在視窗底部，不用捲動就找得到；表單本身比螢幕高時會出現捲軸。
 
 ## 每次遊戲前的啟動
 
@@ -177,7 +178,10 @@ tools/run_on_pc.sh 'py -3 tools\pc\probe-config-gui.py'
 ```
 
 應該看到 `found the settings window: ... visible=True` 與
-`PASS: the settings window opens, with no game required`。
+`PASS: the settings window opens, with no game required`。它也會用 `PrintWindow` 拍一張
+視窗的照片（**不會**把視窗抬到最前面，所以不會搶走遊戲的焦點），放在
+`tools\pc\evidence\<時間>-window-config-gui.bmp`；照片裡的中文若變成空白方框，就是字型
+或編碼問題，看照片就知道。
 
 ### 3. 驗證點擊穿透與不搶焦點
 
@@ -217,8 +221,10 @@ PASS: clicks pass through to the window underneath, and focus was not taken
   若只想用 ASCII 方位（`E3N2`）可用 `--direction-style en`。
 * 預設是**完全透明底**（`--opacity 0`）：只畫字，字後面有一層暗色陰影讓它在亮地面上仍
   可讀。想要深色底就把 opacity 調高（例如 `--opacity 0.86`），那時會一併畫框線。
-* 視窗高度是**上限**，會跟著內容自動增減，所以底部的中文備註不會被切掉；
-  真的超過上限時，最後一行會寫「（還有 N 行未顯示）」。
-* 標籤（標題、備註、狀態）預設中文，`--language en` 可切英文；boss 那幾行是固定格式。
+* 視窗高度是**上限**，會跟著內容自動增減；真的超過上限時，最後一行會寫「（還有 N 行未顯示）」。
+* **overlay 只畫 boss 那幾行**：沒有標題列、沒有定點（例如 Secronom Bunker）、沒有備註、沒有更新時間。
+  要知道「空清單是因為沒有 boss 還是資料來源掛了」，看**主控台**：`-Once`、記錄檔、
+  或 `--presentation console` 都會印出標題、定點、`N 格內`、`半徑外 N 個`、`已更新 N 秒前`。
+* 主控台的標籤預設中文，`--language en` 可切英文；boss 那幾行是固定格式。
 * 輸出（含 `-Once` 的記錄檔）固定用 **UTF-8**，所以抓回 Mac 或任何編輯器都讀得懂。
   注意：冷凍的 exe **不理 `PYTHONIOENCODING`**，所以編碼是在程式裡決定的，不是靠環境變數。

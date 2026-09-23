@@ -169,12 +169,22 @@ def waypoint_line(label: str, block, bearing, settings: Settings) -> str:
     return f"{_fit(label, name_budget(settings, tail))} | {tail}"
 
 
-def rows_for(plan: Plan, settings: Settings, status: str = "", stale: bool = False) -> tuple[Row, ...]:
-    """The full body of the readout: bosses first, then the waypoints and notes."""
+def rows_for(plan: Plan, settings: Settings, status: str = "", stale: bool = False,
+             extras: bool = True) -> tuple[Row, ...]:
+    """The body of the readout: bosses first, then the waypoints and notes.
+
+    ``extras`` is what the in-game window turns off. The player asked for the overlay to
+    be the boss list and nothing else - no waypoints, no notes, no age - so the window
+    over the game is only the lines they read while playing, while the console keeps the
+    full picture. The console is where the tool is checked, and it is the only place left
+    that says whether an empty list is correct or the feed is broken.
+    """
     rows: list[Row] = []
     for boss in plan.rows:
         colour = settings.colour("big") if boss.is_big else settings.colour("list")
         rows.append(Row(boss_line(settings, boss), colour))
+    if not extras:
+        return tuple(rows)
     for label, block in settings.waypoints:
         if plan.player is None:
             continue
@@ -188,6 +198,11 @@ def rows_for(plan: Plan, settings: Settings, status: str = "", stale: bool = Fal
 
 
 def console_lines(plan: Plan, settings: Settings, status: str = "", stale: bool = False) -> list[str]:
-    """The same readout as plain text, for a terminal and for the log file."""
+    """The same readout as plain text, for a terminal and for the log file.
+
+    Always the full picture, whatever the overlay shows: the title, the waypoints, the
+    notes and the age are how a person checks that an empty readout means "no bosses"
+    rather than "the feed is down".
+    """
     return [title_line(plan, settings)] + [f"  {row.text}" for row in
                                           rows_for(plan, settings, status, stale)]

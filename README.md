@@ -14,22 +14,37 @@ had it is `stable version 2.3`).
 
 ## The readout
 
+Over the game, the overlay is the boss list and nothing else — no header, no waypoint,
+no age:
+
 ```text
-DFBossReminder  tommy660  1057,1017  27 個附近
 1 x Charred Titan | 1048 x 1018 | 17:00
 6 x Bandits | 1052 x 1018 | 5LD1
 3 x Mega Mother | 1057 x 1016 | U1
-Secronom Bunker | 1054 x 987 | 3LU30
-20 格內
-半徑外 154 個
-已更新 0 秒前
+```
+
+The console prints the same rows with everything that explains them printed around them,
+which is where you look when the list is empty and you need to know whether that is
+because there are no bosses or because the feed is down:
+
+```text
+DFBossReminder  tommy660  1057,1017  27 個附近
+  1 x Charred Titan | 1048 x 1018 | 17:00
+  6 x Bandits | 1052 x 1018 | 5LD1
+  Secronom Bunker | 1054 x 987 | 3LU30
+  20 格內
+  半徑外 154 個
+  已更新 0 秒前
 ```
 
 The list is drawn in **the client's own HUD font** and **right-aligned** against the
 minimap, at 10 px with a **fully transparent background** — only the glyphs are
 painted, with a single dark drop shadow behind them so they stay readable over bright
-ground. The header, the notes and the status are in Chinese by default (`--language en`
-for English); the boss lines themselves are the fixed format above.
+ground. The Chinese labels default on (`--language en` for English); the boss lines
+themselves are the fixed format above. The one "extra" the overlay keeps is the row that
+says how many bosses are **not** shown: it appears only when the window's maximum height
+is actually hiding rows, which is the one silence that would be read as "that is the
+whole list".
 
 ### Where the font comes from
 
@@ -84,8 +99,9 @@ is where you add your own.
    click-through window that never takes focus (`--presentation overlay`), or outside
    the client (`--presentation panel`), or in the console.
 5. **Opens its own settings window** (`--config`): the whitelist as a table, the font
-   size, the colours, the placement and the big-boss names. It needs no game, no
-   overlay and no network — it is how the account id gets set in the first place.
+   size, the colours, the placement and the big-boss names — every label in Traditional
+   Chinese, and the buttons stay put at the bottom while the form scrolls. It needs no
+   game, no overlay and no network: it is how the account id gets set in the first place.
 6. **Refuses to draw without the game.** The readout is a readout *of the running
    client*, placed against its client area and measured from its player, so with the
    client closed the overlay is not opened at all and the reason is printed. The
