@@ -31,6 +31,7 @@ here is an implementation fact at best.
 | `2026-09-23-overlay-bosses-only-surface.png` | The same readout's own pixels: seven rows on a 340×109 surface, the first row two pixels from the top because no space is reserved for a title |
 | `2026-09-23-overlay-bosses-only-2x.png` | The `--dump-frame` surface of the **built exe** at 2x, so the packaged build is what is being looked at |
 | `2026-09-23-overlay-bosses-only-run.txt` | The run: the placement, `font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300)`, and `F8 toggles whitelist mode` — the hotkey line that had been missing since `d409401` |
+| `2026-09-23-console-keeps-the-notes.txt` | `--once` at the same moment: the same six boss rows **plus** the header, the waypoint line, `5 格內`, `半徑外 144 個` and `已更新 0 秒前`. This is the pair that shows the split — the overlay answers, the console explains |
 | `2026-09-23-settings-window-zh.png` | The settings window in Traditional Chinese, photographed with `PrintWindow` (no activation, no focus stolen): 帳號與範圍, 白名單, 顯示外觀…
 | `2026-09-23-settings-window-zh-from-exe.bmp` | The same window from the rebuilt `DFBossReminderConfig.exe`, so the frozen build renders the Chinese too and not only the source run |
 | `2026-09-23-settings-window-zh.txt` | `tools/pc/probe-config-gui.py` output: it finds exactly one window titled `DFBossReminder 設定`, photographs it, reports whether the game happens to be running, and kills the process tree so nothing is left on the desktop |

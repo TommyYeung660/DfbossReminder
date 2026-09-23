@@ -1,0 +1,19 @@
+DFB interactive run 23/09/2026 �g�T 11:10:36.87
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1790133036-64357
+settings saved to C:\Users\tommy.yeung\.dfbossreminder\settings.json
+DFBossReminder  1057,1017  6 個附近
+  3 x Mega Wraith | 1056 x 1016 | 1LU1
+  6 x Bandits | 1058 x 1016 | 1RU1
+  6 x Bandits | 1058 x 1014 | 1RU3
+  6 x Bandits | 1054 x 1016 | 3LU1
+  6 x Bandits | 1057 x 1013 | U4
+  6 x Bandits | 1053 x 1019 | 4LD2
+  Secronom Bunker | 1054 x 987 | 3LU30
+  5 格內
+  半徑外 144 個
+  已更新 0 秒前
+EXITCODE=0
+
+EXITCODE=0
