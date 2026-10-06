@@ -1,24 +1,30 @@
-DFB interactive run 06/10/2026 ¶g¤G 12:29:47.88
+DFB interactive run 06/10/2026 ¶g¤G 12:45:26.57
 session: interactive desktop (scheduled task)
 
-DFB-RUN-1791260987-77318
+DFB-RUN-1791261926-2401
 the Dead Frontier client is not running: standing a plain window in for it (560x320 at (60, 60), gone at the end)
 anchored to: {'left': 60, 'top': 60, 'width': 560, 'height': 320}
 after the first draw: 3 rows, 3 boxes
     '6 x Bandits | 1057 x 1017 | 0'
     '2 x Bandits | 1057 x 1016 | U1'
     '6 x Bandits | 1058 x 1017 | 1R'
-readout hwnd=0x1a0b16 WS_EX_TRANSPARENT=True (must stay True)
-column  hwnd=0x4f0cae WS_EX_TRANSPARENT=False WS_EX_NOACTIVATE=True (must be False / True)
-  WindowFromPoint at the box (426, 84) -> 'DFBossReminderCheck14468_2' 'DFBossReminderBoxes'
-  WindowFromPoint at the column gap (419, 93) -> 'DFBossProbeUnderlay' 'DFTools probe: stands in for the game wi'
+readout hwnd=0xbc0a1a WS_EX_TRANSPARENT=True (must stay True)
+column  hwnd=0x29705c0 WS_EX_TRANSPARENT=False WS_EX_NOACTIVATE=True (must be False / True)
+  WindowFromPoint at the box (426, 84) -> 'DFBossReminderCheck30600_2' 'DFBossReminderBoxes'
+  WindowFromPoint at the cell (outside the box) (420, 91) -> 'DFBossReminderCheck30600_2' 'DFBossReminderBoxes'
+  WindowFromPoint at the column margin (419, 75) -> 'DFBossProbeUnderlay' 'DFTools probe: stands in for the game wi'
   WindowFromPoint at the readout text (104, 82) -> 'DFBossProbeUnderlay' 'DFTools probe: stands in for the game wi'
-surfaces written to tools\pc\evidence\checkbox
-posting WM_LBUTTONDOWN to the box at (426, 84) (client 8,10)
+cursor before: (0, 752), capture: (none), foreground: 'DFBossProbeUnderlay' 'DFTools probe: stands in for the game wi'
+clicking the box at (426, 84) with SendInput - the path a real mouse takes
+messages the box column received: 17 {'NCHITTEST': 4, 'MOUSEMOVE': 2, 'LBUTTONDOWN': 1, 'LBUTTONUP': 1}
+under the cursor now: 'DFBossReminderCheck30600_2' 'DFBossReminderBoxes'
+cursor put back at (0, 752)
 after the tick: 1 row(s) - ['2 x Bandits | 1057 x 1016 | U1']
 dismissed: ['6 x Bandits']
 rolling the feed over to the next cycle (start 1791262801)
 next cycle: 3 rows again - ['6 x Bandits | 1057 x 1017 | 0', '2 x Bandits | 1057 x 1016 | U1', '6 x Bandits | 1058 x 1017 | 1R']
+clicking the cell at (420, 91) (inside the row, outside the box) with SendInput
+  rows 3 -> 1: ['2 x Bandits | 1057 x 1016 | U1']
 after the loop stopped: windows still alive = none
 the stand-in window is gone
 

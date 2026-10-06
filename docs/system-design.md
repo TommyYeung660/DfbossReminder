@@ -384,6 +384,20 @@ column's gaps and over the readout's text (the window underneath both times).
 The boxes are **filled**, not outlined, for the same reason: an outline is a frame with a
 transparent middle, and a click in the middle would fall through to the game.
 
+**The hit test runs in screen coordinates.** ``WM_NCHITTEST`` carries **screen** coordinates while every mouse
+message after it carries **client** ones, and the boxes are compared against client rectangles. Answering the
+hit test with the wrong pair is invisible in the worst way: the window says "not mine", the system routes the
+click to the window underneath (the game), and the box never hears about it - while ``WindowFromPoint``, which
+never asks a window anything, still resolves that point to the column. That is how a passing probe shipped a
+box the player could not click; the conversion is now explicit (``CheckColumn._to_client``) and pinned by a
+contract test.
+
+**The target is the row's cell, not the box.** The box is drawn eleven pixels square because that is what a
+checkbox looks like, but the thing that takes the click is the whole row: the column's width by one line
+height, filled at an alpha nobody can see, with the box drawn inside it. A layered window's hit test follows
+the alpha, so an invisible-but-non-zero fill is a target - and aiming a mouse at an eleven-pixel square to
+dismiss a row is a test of the player's aim rather than of their intent.
+
 **Why the click has to be pumped.** Nothing arrives in a window procedure until its thread
 dispatches the queue, and until this feature nothing in the project pumped - which is also
 the deeper reason a cross-thread window call used to hang for ever (D22). The loop that owns

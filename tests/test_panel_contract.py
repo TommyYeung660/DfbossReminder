@@ -250,7 +250,7 @@ def test_a_click_on_a_box_is_taken_and_never_activates_the_window() -> None:
     assert "on_check(box.key)" in body
     # Off a box the window must still be see-through for the mouse, whatever the alpha rule
     # is doing: the two mechanisms are independent, and only one of them is load-bearing.
-    assert "return HTCLIENT if box_at(x, y, self.boxes) else HTTRANSPARENT" in body
+    assert "return HTCLIENT if box_at(x, y, self.cells()) else HTTRANSPARENT" in body
 
 
 def test_a_message_that_raises_never_kills_the_readout() -> None:
@@ -279,6 +279,36 @@ def test_the_window_procedure_uses_the_handle_windows_passed_it() -> None:
     head = PANEL_SOURCE[PANEL_SOURCE.index("class CheckColumn"):]
     head = head[:head.index("self._register_class()")]
     assert "self.hwnd = 0" in head
+
+
+def test_the_hit_test_converts_screen_coordinates_to_client_ones() -> None:
+    # WM_NCHITTEST carries *screen* coordinates while the mouse messages that follow carry
+    # client ones, and the two are compared against box rectangles in client space. Getting
+    # that wrong is invisible: the hit test answers HTTRANSPARENT, the system routes the
+    # click to the window underneath, and the box never hears about it - while
+    # WindowFromPoint, which never asks the window, still resolves to it. That is how a
+    # passing probe shipped a box the player could not click.
+    assert "def _to_client(self, x: int, y: int)" in PANEL_SOURCE
+    assert "ScreenToClient" in PANEL_SOURCE
+    body = PANEL_SOURCE[PANEL_SOURCE.index("        if message == WM_NCHITTEST:"):]
+    body = body[:body.index("\n        if message ==")]
+    assert "self._to_client(*_click_point(lparam))" in body, (
+        "the hit test must convert before comparing")
+    # And the mouse messages must *not* be converted: they are already client coordinates.
+    assert "self._to_client(*_click_point(lparam))" not in PANEL_SOURCE.split(
+        "if message == WM_LBUTTONDOWN:")[1][:400]
+    # The fallback keeps the arithmetic the same if the call ever fails.
+    assert "return x - self.left, y - self.top" in PANEL_SOURCE
+
+
+def test_the_whole_row_cell_is_the_target_not_the_eleven_pixel_square() -> None:
+    # The readout is read at a glance; aiming at an eleven-pixel square tests the player's
+    # aim rather than their intent. The cell is filled at an alpha nobody can see, which is
+    # all the layered-window hit test needs.
+    assert panel_module.CELL_ALPHA > 0
+    assert panel_module.CELL_ALPHA < 16, "the cell must not be visible"
+    assert "def cells(self)" in PANEL_SOURCE
+    assert "self.cells()" in PANEL_SOURCE, "the hit test and the fill both use the cells"
 
 
 def test_the_boxes_are_filled_so_the_whole_box_can_be_clicked() -> None:

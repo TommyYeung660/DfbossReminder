@@ -236,13 +236,19 @@ tools/run_on_pc.sh 'py -3 tools\pc\audit-config-gui.py --live --seconds 10'
 tools/run_on_pc.sh 'py -3 tools\pc\probe-checkboxes.py --evidence tools\pc\evidence\checkbox'
 ```
 
+**一定要用 `--real-click`**（它用 `SendInput` 送出真正的滑鼠事件）。不加這個旗標時，
+探針只送 `PostMessage` 並用 `WindowFromPoint` 判斷 —— **兩者都繞過了決定「點擊屬於哪個視窗」的路由**，
+所以它們可以在「真滑鼠點下去完全沒反應」的情況下全部通過。2026-10-06 就是這樣發生過一次。
+
 它起一個真的 overlay（有自己的假 boss 資料，所以不必等真的周期），然後：
 
 * 在方框正中央做 `WindowFromPoint` → 必須是**剔選框那個視窗**（代表點得到）；
 * 在方框之間的縫、以及 overlay 文字上做 `WindowFromPoint` → 必須是**下面的視窗**
   （代表點擊穿透沒有被破壞）；
-* 送一個真的 `WM_LBUTTONDOWN` 到方框（走佇列、由 loop 的 pump 派送，跟真的滑鼠一樣），
+* 用 `SendInput` 在方框正中央按一下真滑鼠，並印出這個視窗**實際收到哪些訊息**
+  （`LBUTTONDOWN: 1` 才叫收到；只有 `NCHITTEST` 就是路由被別人拿走了）；
   然後看行數：3 行 → 1 行（同一個 spawn 的兩行一起消失，別的 boss 留著）；
+* 再在**同一行的格子裡、方框外**按一下（離方框 2 px），也必須收起同一行 —— 那是「手稍微偏一點」的情況；
 * 把資料換成**下一個周期**（同樣的 boss、同樣的座標、新的 start_time），
   下一個 fetch 之後必須回到 3 行。
 

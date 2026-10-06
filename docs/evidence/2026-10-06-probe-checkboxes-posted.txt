@@ -1,0 +1,26 @@
+DFB interactive run 06/10/2026 ¶g¤G 12:30:29.05
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1791261028-78415
+anchored to: {'left': 321, 'top': 88, 'width': 1280, 'height': 720}
+after the first draw: 3 rows, 3 boxes
+    '6 x Bandits | 1057 x 1017 | 0'
+    '2 x Bandits | 1057 x 1016 | U1'
+    '6 x Bandits | 1058 x 1017 | 1R'
+readout hwnd=0x6f0a74 WS_EX_TRANSPARENT=True (must stay True)
+column  hwnd=0x660828 WS_EX_TRANSPARENT=False WS_EX_NOACTIVATE=True (must be False / True)
+  WindowFromPoint at the box (687, 112) -> 'DFBossReminderCheck30344_2' 'DFBossReminderBoxes'
+  WindowFromPoint at the column gap (680, 121) -> 'UnityWndClass' 'Dead Frontier'
+  WindowFromPoint at the readout text (365, 110) -> 'UnityWndClass' 'Dead Frontier'
+surfaces written to tools\pc\evidence\checkbox
+posting WM_LBUTTONDOWN to the box at (687, 112) (client 8,10)
+after the tick: 1 row(s) - ['2 x Bandits | 1057 x 1016 | U1']
+dismissed: ['6 x Bandits']
+rolling the feed over to the next cycle (start 1791262801)
+next cycle: 3 rows again - ['6 x Bandits | 1057 x 1017 | 0', '2 x Bandits | 1057 x 1016 | U1', '6 x Bandits | 1058 x 1017 | 1R']
+after the loop stopped: windows still alive = none
+
+PASS: a box is clickable, everything else still clicks through, one tick hides the whole spawn, and the next cycle brings it back
+EXITCODE=0
+
+EXITCODE=0

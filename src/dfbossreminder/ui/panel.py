@@ -156,6 +156,9 @@ CHECK_TEXT_GAP = 5
 # hole in the text, and enough alpha that the whole box is hit-testable (see CheckColumn).
 BOX_FILL = (18, 18, 18)
 BOX_FILL_ALPHA = 96
+# The rest of the row cell: not a pixel anybody can see, but a pixel the mouse can hit, which
+# is what makes the whole row a target instead of an eleven-pixel square.
+CELL_ALPHA = 6
 
 
 def check_size(font_size: int) -> int:
@@ -252,6 +255,8 @@ def _bind():  # noqa: ANN202 - ctypes handles
     user32.IsWindowVisible.restype = wintypes.BOOL
     user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
     user32.GetWindowRect.restype = wintypes.BOOL
+    user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
+    user32.ScreenToClient.restype = wintypes.BOOL
     user32.DrawTextW.argtypes = [wintypes.HDC, wintypes.LPCWSTR, ctypes.c_int, ctypes.c_void_p,
                                  wintypes.UINT]
     user32.DrawTextW.restype = ctypes.c_int
@@ -1025,6 +1030,23 @@ class CheckColumn:
         del self.errors[:-8]                            # keep the last few, not the session
         self.log(message)
 
+    def _to_client(self, x: int, y: int) -> tuple[int, int]:
+        """A screen point as this window's client point.
+
+        Needed because ``WM_NCHITTEST`` carries **screen** coordinates while every mouse
+        message that follows carries client ones, and comparing the wrong pair is invisible:
+        the hit test simply answers "not mine", the system routes the click to the window
+        underneath, and the box never hears about it. ``WindowFromPoint`` does not ask a
+        window at all, so nothing about it notices either - which is exactly how this shipped
+        once with a passing test.
+        """
+        if not self.hwnd:
+            return x, y
+        point = wintypes.POINT(int(x), int(y))
+        if self.user32.ScreenToClient(wintypes.HWND(self.hwnd), ctypes.byref(point)):
+            return int(point.x), int(point.y)
+        return x - self.left, y - self.top
+
     def _handle(self, hwnd: int, message: int, wparam: int, lparam: int) -> int:  # noqa: ARG002
         """What this window does with a message, which is very little on purpose.
 
@@ -1033,17 +1055,19 @@ class CheckColumn:
         ``self.hwnd`` is still zero at that point.
         """
         if message == WM_NCHITTEST:
-            x, y = _click_point(lparam)
+            # Screen coordinates in, client coordinates out (see _to_client).
+            x, y = self._to_client(*_click_point(lparam))
             # Belt and braces: the alpha rule already hides the empty pixels from
             # hit-testing, so this is only reached on a box - but if it is ever reached
             # elsewhere, the click must still go through to the game.
-            return HTCLIENT if box_at(x, y, self.boxes) else HTTRANSPARENT
+            return HTCLIENT if box_at(x, y, self.cells()) else HTTRANSPARENT
         if message == WM_MOUSEACTIVATE:
             # A click must not activate this window, or the game would lose the keyboard.
             return MA_NOACTIVATE
         if message == WM_LBUTTONDOWN:
+            # Client coordinates here, unlike WM_NCHITTEST above.
             x, y = _click_point(lparam)
-            box = box_at(x, y, self.boxes)
+            box = box_at(x, y, self.cells())
             if box is not None and self.on_check is not None:
                 # On the button *down*: the row goes as soon as the player clicks, and the
                 # release that follows lands on boxes that have moved up under the cursor -
@@ -1087,15 +1111,45 @@ class CheckColumn:
         never point at a row that is not there.
         """
         self.boxes = boxes_for(rows, title_band, line_height, self.font_size)
+        self.line_height = int(line_height)
         self.present()
+
+    def cells(self) -> tuple[Box, ...]:
+        """The boxes, grown to the full row cell, for the hit test and the fill.
+
+        A box is eleven pixels square and the readout is read at a glance, so aiming at the
+        exact square is a test of the player's aim rather than of their intent: a click a
+        pixel high, low or to the side is a click they meant. The cell is one row tall and as
+        wide as the column, and the part of it outside the box is drawn at an alpha nobody
+        can see - which is all the hit test needs, since a layered window's transparent
+        pixels are the pixels that let the mouse through.
+        """
+        grown: list[Box] = []
+        for box in self.boxes:
+            left, top, right, bottom = box.rect
+            row_top = top - (self.line_height - (bottom - top)) // 2
+            grown.append(Box(box.key, (0, row_top, self.width, row_top + self.line_height),
+                             box.colour))
+        return tuple(grown)
 
     def present(self) -> None:
         """Clear to nothing, then draw the boxes - the only opaque pixels in this window."""
         buffer = (ctypes.c_ubyte * (self.width * self.height * 4)).from_address(self.bits)
         ctypes.memset(buffer, 0, len(buffer))
+        # The invisible part first: the whole cell is a target, so it has to be a pixel with
+        # a non-zero alpha, and at alpha 6 it is not a pixel anyone can see.
+        for cell in self.cells():
+            self._fill_rect(cell.rect, (18, 18, 18), CELL_ALPHA)
         for box in self.boxes:
             self._draw_box(box)
         self._update_layered_window()
+
+    def _fill_rect(self, rect: tuple[int, int, int, int], colour: tuple[int, int, int],
+                   alpha: int) -> None:
+        left, top, right, bottom = rect
+        for y in range(max(0, top), min(self.height, bottom)):
+            for x in range(max(0, left), min(self.width, right)):
+                self._put(x, y, colour, alpha)
 
     def _draw_box(self, box: Box) -> None:
         """A dark fill with the row's own colour as its border, so a box says which row.

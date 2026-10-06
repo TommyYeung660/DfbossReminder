@@ -1,23 +1,30 @@
-DFB interactive run 06/10/2026 ¶g¤G 12:30:29.05
+DFB interactive run 06/10/2026 ¶g¤G 12:45:08.54
 session: interactive desktop (scheduled task)
 
-DFB-RUN-1791261028-78415
-anchored to: {'left': 321, 'top': 88, 'width': 1280, 'height': 720}
+DFB-RUN-1791261908-1936
+anchored to: {'left': 530, 'top': 94, 'width': 1280, 'height': 720}
 after the first draw: 3 rows, 3 boxes
     '6 x Bandits | 1057 x 1017 | 0'
     '2 x Bandits | 1057 x 1016 | U1'
     '6 x Bandits | 1058 x 1017 | 1R'
-readout hwnd=0x6f0a74 WS_EX_TRANSPARENT=True (must stay True)
-column  hwnd=0x660828 WS_EX_TRANSPARENT=False WS_EX_NOACTIVATE=True (must be False / True)
-  WindowFromPoint at the box (687, 112) -> 'DFBossReminderCheck30344_2' 'DFBossReminderBoxes'
-  WindowFromPoint at the column gap (680, 121) -> 'UnityWndClass' 'Dead Frontier'
-  WindowFromPoint at the readout text (365, 110) -> 'UnityWndClass' 'Dead Frontier'
+readout hwnd=0x108053c WS_EX_TRANSPARENT=True (must stay True)
+column  hwnd=0xa20c94 WS_EX_TRANSPARENT=False WS_EX_NOACTIVATE=True (must be False / True)
+  WindowFromPoint at the box (896, 118) -> 'DFBossReminderCheck13604_2' 'DFBossReminderBoxes'
+  WindowFromPoint at the cell (outside the box) (890, 125) -> 'DFBossReminderCheck13604_2' 'DFBossReminderBoxes'
+  WindowFromPoint at the column margin (889, 109) -> 'UnityWndClass' 'Dead Frontier'
+  WindowFromPoint at the readout text (574, 116) -> 'UnityWndClass' 'Dead Frontier'
+cursor before: (0, 752), capture: (none), foreground: 'ConsoleWindowClass' 'C:\\Windows\\system32\\cmd.EXE'
 surfaces written to tools\pc\evidence\checkbox
-posting WM_LBUTTONDOWN to the box at (687, 112) (client 8,10)
+clicking the box at (896, 118) with SendInput - the path a real mouse takes
+messages the box column received: 20 {'NCHITTEST': 5, 'MOUSEMOVE': 3, 'LBUTTONDOWN': 1, 'LBUTTONUP': 1}
+under the cursor now: 'DFBossReminderCheck13604_2' 'DFBossReminderBoxes'
+cursor put back at (0, 752)
 after the tick: 1 row(s) - ['2 x Bandits | 1057 x 1016 | U1']
 dismissed: ['6 x Bandits']
 rolling the feed over to the next cycle (start 1791262801)
 next cycle: 3 rows again - ['6 x Bandits | 1057 x 1017 | 0', '2 x Bandits | 1057 x 1016 | U1', '6 x Bandits | 1058 x 1017 | 1R']
+clicking the cell at (890, 125) (inside the row, outside the box) with SendInput
+  rows 3 -> 1: ['2 x Bandits | 1057 x 1016 | U1']
 after the loop stopped: windows still alive = none
 
 PASS: a box is clickable, everything else still clicks through, one tick hides the whole spawn, and the next cycle brings it back
