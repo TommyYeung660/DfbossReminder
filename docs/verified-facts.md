@@ -112,6 +112,24 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | **VIPER NORA has no CJK glyphs**, so the Chinese labels cannot be drawn in it - the header and notes would be a row of empty boxes beside boss lines that look perfect. Two faces are kept and each row picks by its content | Recorded live | the render probe drew 個附近 as boxes; the capture shows the Chinese rows in MS Gothic |
 | The readout is right-aligned, so its rows share a right edge with the minimap | Recorded live | the same capture |
 
+### Verified on the game PC, 2026-10-06 (ninth session: the tick boxes)
+
+The player's sixth request: a box at the right of every boss line, a left click on one hides
+that boss's related lines, and the hiding must not carry into the next cycle. Measured with
+`tools/pc/probe-checkboxes.py`, which drives the real code with its own boss data so it can
+roll a boss through a cycle boundary without waiting an hour for one.
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| **A box takes a click**: `WindowFromPoint` at a box's centre resolved to `'DFBossReminderCheck35596_2' 'DFBossReminderBoxes'` - the tick-box column's own window | Recorded live | `docs/evidence/2026-10-06-probe-checkboxes.txt` |
+| **Everything else still clicks through**: the same call in the column's gaps and over the readout's text resolved to the window underneath both times, and the readout still reports `WS_EX_TRANSPARENT=True` while the column reports `False` with `WS_EX_NOACTIVATE=True` | Recorded live | the same run |
+| **One tick hides the whole spawn**: a posted `WM_LBUTTONDOWN` (through the queue and the loop's pump, as a real click does) took the readout from 3 rows to 1 - both `6 x Bandits` rows gone, the separate `2 x Bandits` spawn untouched | Recorded live | the same run, `docs/evidence/2026-10-06-checkbox-{before,after}.png` |
+| **The next cycle brings it back**: with the feed rolled to the next hour (same boss, same blocks, a new `start_time`), the loop's own fetch put all 3 rows back and the dismissal set was empty | Recorded live | the same run, `2026-10-06-checkbox-next-cycle.png` |
+| Stopping the readout takes **both** windows down (`windows still alive = none`) | Recorded live | the same run |
+| The window procedure must use the handle Windows passes it, not `self.hwnd`: `WM_NCCREATE` arrives *during* `CreateWindowExW`, so reaching for `self.hwnd` raises, `WM_NCCREATE` answers 0, and `CreateWindowExW` fails with **no error number at all** | Recorded live (the first run of the column died this way; the fix is pinned by a contract test) | fixed in `CheckColumn._handle`; `tests/test_panel_contract.py` |
+| **What the boxes cost the text**: with the player's own settings (font 11, width 340, `below-minimap`, offset 14) the readout's rectangle stays `(1242,331)-(1582,447)` and it reports `20px reserved for the tick boxes` and `7 box(es)` on live data - the text's right edge moves from 1574 to 1554, which shortens the two longest names by about three characters. `對齊位移 x = -5` puts the text back where it was, `寬度 +20` restores the name budget | Recorded live | `docs/evidence/2026-10-06-checkbox-real-data.png`, `docs/evidence/2026-10-06-real-dump.txt` |
+| The live audit counts **both** window classes, so a stopped readout cannot leave a column floating, and its position checks read the text window's rectangle rather than the narrow column's | Implementation fact | `tools/pc/audit-config-gui.py` |
+
 ### Verified on the game PC, 2026-09-23 (eighth session: 停止, and the position buttons)
 
 Two defects the player found by playing: 停止 did not stop the readout and a second overlay

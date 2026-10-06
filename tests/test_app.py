@@ -13,8 +13,10 @@ import pytest
 
 from dfbossreminder import app
 from dfbossreminder.domain.geometry import Block
+from dfbossreminder.domain.plan import build_plan
 from dfbossreminder.domain.settings import Settings, parse_settings
 from dfbossreminder.services.window import GameWindow, Rect
+from dfbossreminder.ui import view
 from dfbossreminder.ui.panel import Row
 
 PROFILE = {"gpscoords": ["1057", "1017"], "override": {"account_name": "tommy660"}}
@@ -472,9 +474,13 @@ def presenter_with(fitting: int) -> app.OverlayPresenter:
     presenter.font_cache = None
     presenter.overlay = StubOverlay(fitting)
     # Set here because __new__ skipped __init__: the live position adjustment has to exist
-    # before the window can be placed. (A reminder of why the tests that can use the real
-    # constructor do - see the controller tests.)
+    # before the window can be placed, and the box column is what the drawing path writes
+    # to. Both are None because this machine has no Windows to make windows with - the real
+    # column is covered by tools/pc/probe-checkboxes.py. (A reminder of why the tests that
+    # *can* use the real constructor do: see the controller tests.)
     presenter.adjustment = (0, 0)
+    presenter.boxes = None
+    presenter.on_check = None
     return presenter
 
 
@@ -642,7 +648,11 @@ class ThreadRecordingPresenter:
     def describe(self) -> str:
         return "stub overlay"
 
-    def dump(self, path: str) -> None:
+    def dump(self, path: str, boxes_path: str = "") -> None:
+        # Both surfaces, because the readout is two windows now: the text and the tick-box
+        # column. A stub with the old one-argument signature would hide a break in the
+        # evidence path - which is the kind of stub that lied about the controller's API
+        # once already.
         return None
 
     adjustment: tuple[int, int] = (0, 0)
@@ -840,6 +850,173 @@ def test_realign_says_so_when_the_game_window_has_gone(monkeypatch) -> None:
     controller.watch._drain_requests()
     assert not ok and "找不到" in message
     controller.stop()
+
+
+# ------------------------------------------------------------- the tick boxes
+
+
+class ClickingPresenter(FakePresenter):
+    """An overlay-shaped presenter whose pump delivers one click, as Windows would.
+
+    ``on_check`` is what the loop sets, and it is called from inside the pump - on the
+    loop's own thread, between two sleep slices - so this stands in for the whole path from
+    a mouse message to a dismissed boss.
+    """
+
+    kind = "overlay"
+
+    def __init__(self, click_at_pump: int = 3) -> None:
+        super().__init__()
+        self.on_check = None
+        self.pumps = 0
+        self.click_at_pump = click_at_pump
+        self.draws_when_clicked: int | None = None
+        self.clicked = ("1", 1.0)        # the BOSS fixture's Bandits spawn
+
+    def pump_messages(self) -> int:
+        self.pumps += 1
+        if self.pumps == self.click_at_pump and self.on_check is not None:
+            self.on_check(self.clicked)
+            self.draws_when_clicked = len(self.draws)
+        return 0
+
+
+def test_the_loop_pumps_a_tick_and_redraws_at_once() -> None:
+    # Both halves of the box column's live behaviour, in the loop that owns it: the message
+    # queue is pumped (without that, a click is never dispatched and nothing arrives in the
+    # window procedure), and a tick redraws on the next slice instead of waiting out the
+    # interval - which is the difference between a control and a suggestion.
+    presenter = ClickingPresenter()
+    watch_obj, _presenter = watch(settings=parse_settings({"user_id": "14008279",
+                                                           "radius_blocks": 200,
+                                                           "poll_seconds": 20}),
+                                  presenter=presenter)
+    watch_obj.run(seconds=0.8)
+    assert presenter.pumps >= 3, "the loop must pump, or a tick can never be dispatched"
+    assert presenter.draws_when_clicked is not None, "the click never reached the loop"
+    assert len(presenter.draws) > presenter.draws_when_clicked, "a tick must redraw at once"
+    assert ("1", 1.0) in watch_obj.dismissed
+    # The redraw that followed the click is missing that boss's rows, and only its rows.
+    assert [row.name for row in presenter.draws[-1]["plan"].rows] == ["Titan"]
+    assert presenter.closed
+
+
+def test_a_console_presenter_has_nothing_to_click() -> None:
+    # The handler is only wired where there are windows: a console presenter must not grow
+    # an attribute, and the loop must run without one.
+    watch_obj, presenter = watch()
+    assert not hasattr(presenter, "on_check")
+    # Stopped from the start: the first tick still happens, and the loop does not sit out a
+    # console interval (five seconds) to prove there was nothing to pump.
+    import threading
+
+    stop = threading.Event()
+    stop.set()
+    watch_obj.run(stop=stop)
+    assert presenter.draws
+
+
+def test_ticking_a_boss_takes_it_out_of_the_plan_and_the_console_says_so() -> None:
+    watch_obj, presenter = watch(settings=parse_settings({"user_id": "14008279",
+                                                          "radius_blocks": 200}))
+    watch_obj.tick(1000.0)
+    key = watch_obj.events[0].cycle_key
+    watch_obj.dismiss(key)
+    plan = watch_obj.plan(1000.0)
+    assert [row.name for row in plan.rows] == ["Titan"]
+    note = next(note for note in plan.notes if note.code == "dismissed")
+    assert note.values()["bosses"] == 1 and note.values()["rows"] == 1
+    # And the console keeps saying it, so an empty-looking list is explainable.
+    lines = "\n".join(view.console_lines(plan, watch_obj.settings))
+    assert "你隱藏了 1 個 boss" in lines
+
+
+def test_a_fetch_that_drops_the_spawn_forgets_the_dismissal() -> None:
+    # A spawn the feed no longer lists is over, so its dismissal goes: that is the end of a
+    # cycle as far as the readout is concerned, and it is why the tick-box set cannot grow
+    # without bound over a long session.
+    client = FakeClient()
+    watch_obj, _presenter = watch(client=client,
+                                 settings=parse_settings({"user_id": "14008279",
+                                                          "radius_blocks": 200,
+                                                          "poll_seconds": 20}))
+    watch_obj.tick(1000.0)
+    watch_obj.dismiss(watch_obj.events[0].cycle_key)
+    assert len(watch_obj.dismissed) == 1
+
+    client.bossmap_payload = {key: value for key, value in BOSS.items() if key != "1"}
+    watch_obj.tick(1030.0)                                   # past the poll interval
+    assert len(watch_obj.dismissed) == 0, "the spawn is gone, so nothing is hidden"
+    assert [row.name for row in watch_obj.plan(1030.0).rows] == ["Titan"]
+
+
+def test_the_overlay_leaves_room_for_the_boxes_in_its_own_lines() -> None:
+    # The window draws the rows it is handed, so the room for the boxes has to be inside the
+    # text: without the gutter a long name is elided by the drawing rectangle and the block
+    # coordinate and bearing - the two fields the row exists for - are what gets eaten.
+    from dfbossreminder.domain.bosses import parse_bossmap
+
+    long_name = "1 x Evolved Longarm Mutant Brute of the Northern Wasteland"
+    payload = {"1": {"game_id": "1", "locations": [["1057", "1018"]],
+                     "special_enemy_type": long_name, "special_enemy_amount": "1",
+                     "boss_num": "1", "event_type": "",
+                     "start_time": "1", "end_time": "9999999999"}}
+    events = parse_bossmap(payload, now=1.0)
+    settings = parse_settings({"font_size": 10, "width": 340, "radius_blocks": 200})
+    plan = build_plan(events, Block(1057, 1017), settings, 1.0)
+    presenter = presenter_with(fitting=8)
+    presenter.draw(plan, settings, "tommy660", "", False)
+    line = presenter.overlay.rows[0].text
+    gutter = app.check_gutter(settings.font_size)
+    assert gutter > 0
+    assert view.display_width(line) <= view.columns_for(settings, gutter), (
+        "the line must fit the width the boxes leave, not the full panel")
+    assert "|" in line and "1018" in line, "the coordinate survived the elision"
+
+
+def test_the_presenter_gives_the_box_column_a_window_of_its_own() -> None:
+    # The readout keeps WS_EX_TRANSPARENT - which makes it provably click-through, and also
+    # makes it unable to receive a click at all - so the clickable part is a second window.
+    presenter = presenter_with(fitting=8)
+    assert presenter.boxes is None, "no Windows here: the column is made on the game PC"
+    # What can be checked anywhere is that the presenter asks for the room and hands the
+    # rows to whatever column it has.
+    called: list = []
+    presenter.boxes = type("Column", (), {
+        "place": lambda self, *a, **k: called.append(("place", a)),
+        "set_boxes": lambda self, rows, band, line: called.append(("boxes", rows, band, line)),
+        "width": 14})()
+    presenter.overlay.left, presenter.overlay.top = 200, 100
+    presenter.overlay.title_band = 2
+    presenter.overlay.line_height = 15
+    presenter.overlay.width = 340
+    presenter.overlay.height = 90
+    plan = build_plan([], None, parse_settings({}), 1.0)
+    presenter.draw(plan, parse_settings({}), "", "", False)
+    assert called[0][0] == "place"
+    assert called[1][0] == "boxes" and called[1][2:] == (2, 15)
+
+
+def test_both_surfaces_can_be_written_out_for_evidence() -> None:
+    # --dump-frame and --dump-boxes: the pixels of the text and of the boxes, which is what
+    # says what the readout drew and which pixels can take a click.
+    dumped: list = []
+
+    class Dumping(FakePresenter):
+        kind = "overlay"
+
+        def dump(self, path: str, boxes_path: str = "") -> str:  # noqa: ANN001
+            dumped.append((path, boxes_path))
+            return path
+
+    presenter = Dumping()
+    watch_obj, _presenter = watch(settings=parse_settings({"user_id": "14008279",
+                                                           "radius_blocks": 200}),
+                                  presenter=presenter)
+    watch_obj.dump_frame = "readout.bmp"
+    watch_obj.dump_boxes = "boxes.bmp"
+    watch_obj.tick(1000.0)
+    assert dumped == [("readout.bmp", "boxes.bmp")]
 
 
 def test_the_last_row_is_never_the_one_that_disappears() -> None:

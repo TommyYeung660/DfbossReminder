@@ -135,10 +135,88 @@ def needs_cjk(text: str) -> bool:
 
 @dataclass(frozen=True)
 class Row:
-    """One line of the readout: its text and its colour."""
+    """One line of the readout: its text, its colour, and what a tick would hide.
+
+    ``key`` is the spawn the row belongs to, and only boss rows have one: a tick on a note
+    or a waypoint would have nothing to hide. It is what the box column hands back when the
+    player clicks, so nothing here has to know what a boss event is.
+    """
 
     text: str
     colour: tuple[int, int, int] = (235, 235, 235)
+    key: tuple[str, float] | None = None
+
+
+# The tick box beside each row. Its size follows the font size for the same reason the line
+# height does - the box has to look like it belongs to the row it sits next to - and the
+# column is the box plus a margin on each side so the border is never on the window edge.
+CHECK_PAD = 2
+CHECK_TEXT_GAP = 5
+# The box's own colours: a faint dark fill so the box reads as a control rather than as a
+# hole in the text, and enough alpha that the whole box is hit-testable (see CheckColumn).
+BOX_FILL = (18, 18, 18)
+BOX_FILL_ALPHA = 96
+
+
+def check_size(font_size: int) -> int:
+    """The box's side, in pixels: as tall as the font, within reason."""
+    return max(8, min(16, int(font_size)))
+
+
+def check_column_width(font_size: int) -> int:
+    """The width of the window that holds the boxes."""
+    return check_size(font_size) + 2 * CHECK_PAD
+
+
+def check_gutter(font_size: int) -> int:
+    """What the readout's text gives up at its right edge for that window."""
+    return check_column_width(font_size) + CHECK_TEXT_GAP
+
+
+@dataclass(frozen=True)
+class Box:
+    """One tick box: what it hides, where it is, and the colour of its row.
+
+    The rectangle is in the box column's own client coordinates, so hit-testing a click is
+    comparing two numbers - which is why it can be tested without Windows.
+    """
+
+    key: tuple[str, float]
+    rect: tuple[int, int, int, int]          # left, top, right, bottom
+    colour: tuple[int, int, int] = (235, 235, 235)
+
+    def contains(self, x: int, y: int) -> bool:
+        left, top, right, bottom = self.rect
+        return left <= x < right and top <= y < bottom
+
+
+def boxes_for(rows: tuple[Row, ...], title_band: int, line_height: int,
+              font_size: int) -> tuple[Box, ...]:
+    """The boxes for these rows, one per row that has something to hide.
+
+    Every row advances the cursor, including the rows with no key: the boxes have to line up
+    with the rows the readout drew, and a note between two bosses must leave the gap it
+    occupies rather than pulling the boxes up.
+    """
+    size = check_size(font_size)
+    top_offset = max(0, (line_height - size) // 2)
+    boxes: list[Box] = []
+    for index, row in enumerate(rows):
+        if row.key is None:
+            continue
+        top = title_band + index * line_height + top_offset
+        boxes.append(Box(key=row.key,
+                         rect=(CHECK_PAD, top, CHECK_PAD + size, top + size),
+                         colour=row.colour))
+    return tuple(boxes)
+
+
+def box_at(x: int, y: int, boxes: tuple[Box, ...]) -> Box | None:
+    """The box under a point, or ``None`` - the whole of the click routing."""
+    for box in boxes:
+        if box.contains(x, y):
+            return box
+    return None
 
 
 def _bind():  # noqa: ANN202 - ctypes handles
@@ -222,6 +300,68 @@ def _rgb(colour: tuple[int, int, int]) -> int:
     return (red & 0xFF) | ((green & 0xFF) << 8) | ((blue & 0xFF) << 16)
 
 
+# ------------------------------------------------------------------- messages
+#
+# A window that is meant to be clicked needs someone to take its messages off the queue:
+# nothing arrives in a window procedure until the thread that owns the window pumps. The
+# readout did not need one until it grew a tick box - and that is also why a window call
+# from *another* thread used to hang for ever: nothing here ever dispatched anything.
+PM_REMOVE = 0x0001
+WM_NCHITTEST = 0x0084
+WM_MOUSEACTIVATE = 0x0021
+WM_LBUTTONDOWN = 0x0201
+HTCLIENT = 1
+HTTRANSPARENT = -1
+MA_NOACTIVATE = 3
+
+_PUMP = None
+
+
+def _pump_api():  # noqa: ANN202 - ctypes handles
+    """user32's queue calls, bound once, and only on Windows."""
+    global _PUMP  # noqa: PLW0603 - one process-wide binding, like ``_bind``
+    if _PUMP is not None:
+        return _PUMP
+    if sys.platform != "win32":
+        raise RuntimeError("the overlay needs Windows")
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.PeekMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND,
+                                    wintypes.UINT, wintypes.UINT, wintypes.UINT]
+    user32.PeekMessageW.restype = wintypes.BOOL
+    user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.TranslateMessage.restype = wintypes.BOOL
+    user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.DispatchMessageW.restype = ctypes.c_long
+    _PUMP = user32
+    return _PUMP
+
+
+def pump_messages(limit: int = 256) -> int:
+    """Dispatch what Windows queued for this thread, and say how many messages it was.
+
+    Pumped rather than left to Windows because our thread owns the windows: the boxes only
+    work if somebody dispatches their clicks, and the count is returned so a caller can say
+    what happened in a log rather than guessing.
+    """
+    user32 = _pump_api()
+    message = wintypes.MSG()
+    count = 0
+    while count < limit and user32.PeekMessageW(ctypes.byref(message), None, 0, 0, PM_REMOVE):
+        user32.TranslateMessage(ctypes.byref(message))
+        user32.DispatchMessageW(ctypes.byref(message))
+        count += 1
+    return count
+
+
+def _click_point(lparam: int) -> tuple[int, int]:
+    """The client coordinates in a mouse message's ``lparam``.
+
+    Signed on purpose: a window can be dragged to a negative coordinate, and reading these
+    as unsigned puts a click on the left edge 65 000 pixels away.
+    """
+    return (ctypes.c_short(lparam & 0xFFFF).value, ctypes.c_short((lparam >> 16) & 0xFFFF).value)
+
+
 def composite_bmp_rows(raw: bytes, width: int, height: int,
                        backdrop: tuple[int, int, int] = (96, 96, 96)) -> bytes:
     """The DIB's pixels as 24-bit BMP rows, composited over ``backdrop``.
@@ -277,6 +417,7 @@ class Overlay:
         align: str = "right",
         cjk_face: str = "",
         font_weight: int = 300,
+        check_gutter: int = 0,
     ) -> None:
         self.user32, self.gdi32 = _bind()
         self.width, self.height = int(width), int(height)
@@ -286,6 +427,10 @@ class Overlay:
         self.title_colour = title_colour
         self.text_shadow = text_shadow
         self.align = align if align in ALIGN_FLAGS else "right"
+        # Space kept at the right edge for the tick boxes, which live in a window of their
+        # own (see CheckColumn). The rows are drawn inside it, so a long line is elided by
+        # the drawing rectangle instead of running under the boxes.
+        self.check_gutter = max(0, int(check_gutter))
         # A fully transparent backing means the readout is text only: a frame or a
         # title rule with nothing behind it is just stray lines over the game, so both
         # are dropped rather than left floating.
@@ -634,7 +779,8 @@ class Overlay:
         for row in self._rows:
             if y + self.line_height > self.height - 2:
                 break
-            self._text(row.text, 8, y, self.width - 8, y + self.line_height, row.colour, flags)
+            self._text(row.text, 8, y, self.width - 8 - self.check_gutter,
+                       y + self.line_height, row.colour, flags)
             y += self.line_height
         # Remembered so the alpha pass only walks the rows that can hold glyphs.
         self.last_text_y = y
@@ -725,8 +871,14 @@ class Overlay:
         # it is deliberately not phrased as a claim about the drawn strokes.
         weight = (f"; weight={self.resolved_weight} (asked {self.font_weight})"
                   if self.resolved_weight else "")
+        boxes = f"; {self.check_gutter}px reserved for the tick boxes" if self.check_gutter else ""
         return (f"overlay visible={visible} at {where}{font}{cjk}{weight}; align={self.align}; "
-                f"{backing}{shadow}")
+                f"{backing}{shadow}{boxes}")
+
+    @property
+    def rows(self) -> tuple[Row, ...]:
+        """What is on screen, for a test or a probe to read back."""
+        return self._rows
 
     def dump(self, path: str, backdrop: tuple[int, int, int] = (96, 96, 96)) -> str:
         """Write the surface the overlay is presenting, as a 24-bit BMP.
@@ -764,6 +916,277 @@ class Overlay:
         # else's; a name derived from the object's address instead collided, and the
         # unlucky second overlay failed to open with an opaque
         # "RegisterClassW failed: 1410".
+        if self._class_name:
+            self.user32.UnregisterClassW(self._class_name, None)
+
+
+class CheckColumn:
+    """The narrow window that holds the tick boxes: the part that is meant to be clicked.
+
+    It is a window of its own rather than pixels inside the readout, and the reason is the
+    one safety property this project has spent the most effort on. The readout is created
+    with ``WS_EX_TRANSPARENT``, which Windows honours by skipping the window *entirely* when
+    it hit-tests the mouse - that is what makes "a click over the readout reaches the game"
+    provable rather than hopeful, and it is worth keeping on the window the player stares at
+    for an hour at a time. A window with that flag can never receive a click, so the part
+    that must receive one cannot live in it.
+
+    What keeps *this* window out of the way is the other documented rule: hit-testing a
+    layered window follows its pixels, and a pixel whose alpha is zero lets the mouse
+    through. So the surface is cleared to nothing and only the boxes are drawn, and every
+    click that is not on a box goes to the game underneath - which is also why the boxes are
+    filled rather than drawn as outlines: an outline would leave the middle of the box
+    transparent, and a click there would fall through to the game.
+
+    The strip is narrow (the width of one box plus its margins) on purpose. Even in the
+    worst case, where the alpha rule did not apply at all, what it could block is a column
+    the width of a checkbox - not the readout.
+    """
+
+    kind = "checkboxes"
+
+    def __init__(
+        self,
+        left: int,
+        top: int,
+        width: int,
+        height: int,
+        font_size: int = 14,
+        log=print,  # noqa: ANN001
+    ) -> None:
+        self.user32, self.gdi32 = _bind()
+        self.left, self.top = int(left), int(top)
+        self.width, self.height = int(width), int(height)
+        self.font_size = int(font_size)
+        self.log = log
+        # Set before the window exists, because messages arrive *during* CreateWindowExW:
+        # Windows sends WM_NCCREATE and WM_NCCALCSIZE before it returns a handle, so
+        # anything in the window procedure that reaches for self.hwnd must find something
+        # there. The first live run of this window died exactly that way - the window
+        # procedure raised, WM_NCCREATE answered 0, and CreateWindowExW failed with no error
+        # number at all, which read like a resource problem rather than an ordering one.
+        self.hwnd = 0
+        self.boxes: tuple[Box, ...] = ()
+        self.errors: list[str] = []
+        # Set by the presenter: called with the key of the box that was clicked, on this
+        # window's own thread (see pump_messages).
+        self.on_check = None                            # noqa: ANN001 - Callable[[key], None]
+        self._class_name = f"DFBossReminderCheck{os.getpid()}_{next(_CLASS_SEQ)}"
+
+        self._register_class()
+        # No WS_EX_TRANSPARENT: this window exists to be clicked. Everything else is the
+        # same set the readout uses, and for the same reasons - layered for per-pixel alpha,
+        # topmost so it stays over the client, toolwindow so it is not in alt-tab, and
+        # noactivate so a click can never take focus from the game.
+        self.hwnd = self.user32.CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            self._class_name, "DFBossReminderBoxes", WS_POPUP,
+            self.left, self.top, self.width, self.height, None, None, None, None)
+        if not self.hwnd:
+            raise OSError(f"CreateWindowExW failed for the box column: "
+                          f"{ctypes.get_last_error()}")
+        self._create_buffer()
+        self.user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
+        self.present()
+
+    # -------------------------------------------------------------------- window
+    def _register_class(self) -> None:
+        WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, wintypes.HWND, wintypes.UINT,
+                                     wintypes.WPARAM, wintypes.LPARAM)
+
+        def _proc(hwnd, message, wparam, lparam):  # noqa: ANN001, ANN202
+            try:
+                return self._handle(hwnd, message, wparam, lparam)
+            except Exception as error:              # noqa: BLE001 - never kill the pump
+                # This runs inside DispatchMessage, on the loop's thread: an exception here
+                # would come out of the pump and take the whole readout down. A broken
+                # click handler must cost a click, not the overlay.
+                self._note(f"the box column failed on message {message:#06x}: {error}")
+                return 0
+
+        self._wndproc = WNDPROC(_proc)
+
+        class _WNDCLASS(ctypes.Structure):
+            _fields_ = [("style", wintypes.UINT), ("lpfnWndProc", WNDPROC),
+                        ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int),
+                        ("hInstance", wintypes.HINSTANCE), ("hIcon", wintypes.HICON),
+                        ("hCursor", wintypes.HANDLE), ("hbrBackground", wintypes.HBRUSH),
+                        ("lpszMenuName", wintypes.LPCWSTR), ("lpszClassName", wintypes.LPCWSTR)]
+
+        window_class = _WNDCLASS()
+        window_class.lpfnWndProc = self._wndproc
+        window_class.lpszClassName = self._class_name
+        if not self.user32.RegisterClassW(ctypes.byref(window_class)):
+            raise OSError(f"RegisterClassW failed for the box column: "
+                          f"{ctypes.get_last_error()}")
+
+    def _note(self, message: str) -> None:
+        self.errors.append(message)
+        del self.errors[:-8]                            # keep the last few, not the session
+        self.log(message)
+
+    def _handle(self, hwnd: int, message: int, wparam: int, lparam: int) -> int:  # noqa: ARG002
+        """What this window does with a message, which is very little on purpose.
+
+        ``hwnd`` is the one Windows passed, and it is used rather than ``self.hwnd``: the
+        first messages of a window's life arrive before ``CreateWindowExW`` has returned, so
+        ``self.hwnd`` is still zero at that point.
+        """
+        if message == WM_NCHITTEST:
+            x, y = _click_point(lparam)
+            # Belt and braces: the alpha rule already hides the empty pixels from
+            # hit-testing, so this is only reached on a box - but if it is ever reached
+            # elsewhere, the click must still go through to the game.
+            return HTCLIENT if box_at(x, y, self.boxes) else HTTRANSPARENT
+        if message == WM_MOUSEACTIVATE:
+            # A click must not activate this window, or the game would lose the keyboard.
+            return MA_NOACTIVATE
+        if message == WM_LBUTTONDOWN:
+            x, y = _click_point(lparam)
+            box = box_at(x, y, self.boxes)
+            if box is not None and self.on_check is not None:
+                # On the button *down*: the row goes as soon as the player clicks, and the
+                # release that follows lands on boxes that have moved up under the cursor -
+                # acting on it as well would hide a second boss nobody aimed at.
+                self.on_check(box.key)
+            return 0
+        return self.user32.DefWindowProcW(wintypes.HWND(hwnd), message, wparam, lparam)
+
+    def _create_buffer(self) -> None:
+        self.screen_dc = self.user32.GetDC(None)
+        self.mem_dc = self.gdi32.CreateCompatibleDC(self.screen_dc)
+        header = _BITMAPINFO()
+        header.bmiHeader.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
+        header.bmiHeader.biWidth = self.width
+        header.bmiHeader.biHeight = -self.height           # top-down
+        header.bmiHeader.biPlanes = 1
+        header.bmiHeader.biBitCount = 32
+        header.bmiHeader.biCompression = BI_RGB
+        bits = ctypes.c_void_p()
+        self.bitmap = self.gdi32.CreateDIBSection(self.mem_dc, ctypes.byref(header),
+                                                  DIB_RGB_COLORS, ctypes.byref(bits), None, 0)
+        self.bits = bits.value
+        if not self.bitmap or not self.bits:
+            raise OSError("could not create the box column's DIB section")
+        self.gdi32.SelectObject(self.mem_dc, self.bitmap)
+        self.blend = _BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
+
+    def _release_buffer(self) -> None:
+        if self.bitmap:
+            self.gdi32.DeleteObject(self.bitmap)
+            self.bitmap = 0
+        if self.mem_dc:
+            self.gdi32.DeleteDC(self.mem_dc)
+            self.mem_dc = 0
+
+    # ------------------------------------------------------------------- content
+    def set_boxes(self, rows: tuple[Row, ...], title_band: int, line_height: int) -> None:
+        """Work out the boxes for the rows the readout just drew, and present them.
+
+        Called by the presenter with the *same* rows it handed the readout, so a box can
+        never point at a row that is not there.
+        """
+        self.boxes = boxes_for(rows, title_band, line_height, self.font_size)
+        self.present()
+
+    def present(self) -> None:
+        """Clear to nothing, then draw the boxes - the only opaque pixels in this window."""
+        buffer = (ctypes.c_ubyte * (self.width * self.height * 4)).from_address(self.bits)
+        ctypes.memset(buffer, 0, len(buffer))
+        for box in self.boxes:
+            self._draw_box(box)
+        self._update_layered_window()
+
+    def _draw_box(self, box: Box) -> None:
+        """A dark fill with the row's own colour as its border, so a box says which row.
+
+        The fill is what makes the whole box clickable: a transparent middle would let a
+        click fall through to the game, and a box you have to hit the frame of is a box that
+        does not work. It is drawn faintly - the readout is a transparent HUD, and a row of
+        solid chips would be more ink than the text beside them.
+        """
+        left, top, right, bottom = box.rect
+        for y in range(top, bottom):
+            for x in range(left, right):
+                edge = x in (left, right - 1) or y in (top, bottom - 1)
+                self._put(x, y, box.colour if edge else BOX_FILL,
+                          235 if edge else BOX_FILL_ALPHA)
+
+    def _put(self, x: int, y: int, colour: tuple[int, int, int], alpha: int) -> None:
+        if not (0 <= x < self.width and 0 <= y < self.height):
+            return
+        red, green, blue = colour
+        offset = (y * self.width + x) * 4
+        buffer = (ctypes.c_ubyte * 4).from_address(self.bits + offset)
+        buffer[0] = blue * alpha // 255
+        buffer[1] = green * alpha // 255
+        buffer[2] = red * alpha // 255
+        buffer[3] = alpha
+
+    def _update_layered_window(self) -> None:
+        size = wintypes.SIZE(self.width, self.height)
+        source = wintypes.POINT(0, 0)
+        destination = wintypes.POINT(self.left, self.top)
+        ok = self.user32.UpdateLayeredWindow(self.hwnd, self.screen_dc,
+                                             ctypes.byref(destination), ctypes.byref(size),
+                                             self.mem_dc, ctypes.byref(source), 0,
+                                             ctypes.byref(self.blend), ULW_ALPHA)
+        if not ok:
+            raise OSError(f"UpdateLayeredWindow failed for the box column: "
+                          f"{ctypes.get_last_error()}")
+
+    # ------------------------------------------------------------------ movement
+    def place(self, left: int, top: int, width: int, height: int) -> None:
+        """Follow the readout. Any change to the surface needs a new DIB."""
+        if (left, top, width, height) == (self.left, self.top, self.width, self.height):
+            return
+        self._release_buffer()
+        self.left, self.top = int(left), int(top)
+        self.width, self.height = int(width), int(height)
+        self.user32.SetWindowPos(wintypes.HWND(self.hwnd), wintypes.HWND(HWND_TOPMOST),
+                                 self.left, self.top, self.width, self.height,
+                                 SWP_NOACTIVATE | SWP_SHOWWINDOW)
+        self._create_buffer()
+        self.present()
+
+    def move_to(self, left: int, top: int) -> None:
+        if (left, top) == (self.left, self.top):
+            return
+        self.left, self.top = int(left), int(top)
+        self.user32.SetWindowPos(wintypes.HWND(self.hwnd), wintypes.HWND(HWND_TOPMOST),
+                                 self.left, self.top, 0, 0,
+                                 SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW)
+
+    # ------------------------------------------------------------------ reporting
+    def describe(self) -> str:
+        rect = wintypes.RECT()
+        visible = bool(self.user32.IsWindowVisible(wintypes.HWND(self.hwnd)))
+        placed = bool(self.user32.GetWindowRect(wintypes.HWND(self.hwnd), ctypes.byref(rect)))
+        where = (f"({rect.left},{rect.top})-({rect.right},{rect.bottom})"
+                 if placed else "unreadable")
+        broken = f"; {len(self.errors)} failed message(s)" if self.errors else ""
+        return (f"boxes visible={visible} at {where}, {len(self.boxes)} box(es), "
+                f"click-through except on a box{broken}")
+
+    def dump(self, path: str, backdrop: tuple[int, int, int] = (96, 96, 96)) -> str:
+        """The column's own surface as a BMP, for evidence about what is clickable."""
+        raw = ctypes.string_at(self.bits, self.width * self.height * 4)
+        pixels = composite_bmp_rows(raw, self.width, self.height, backdrop)
+        header = struct.pack("<2sIHHI", b"BM", 14 + 40 + len(pixels), 0, 0, 14 + 40)
+        info = struct.pack("<IiiHHIIiiII", 40, self.width, self.height, 1, 24, 0,
+                           len(pixels), 2835, 2835, 0, 0)
+        with open(path, "wb") as handle:
+            handle.write(header + info + pixels)
+        return path
+
+    def close(self) -> None:
+        self._release_buffer()
+        if getattr(self, "screen_dc", None):
+            self.user32.ReleaseDC(None, self.screen_dc)
+            self.screen_dc = 0
+        if self.hwnd:
+            self.user32.DestroyWindow(wintypes.HWND(self.hwnd))
+            self.hwnd = 0
         if self._class_name:
             self.user32.UnregisterClassW(self._class_name, None)
 

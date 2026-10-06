@@ -38,6 +38,8 @@ NOTE_TEXT: dict[str, tuple[str, str]] = {
                "{rules} coordinate style(s), {matched} rows matched"),
     "missions": ("包含任務", "missions included"),
     "capped": ("還有 {count} 個未顯示", "{count} more not shown"),
+    "dismissed": ("你隱藏了 {bosses} 個 boss（{rows} 列），下個周期會再出現",
+                  "you hid {bosses} boss(es) ({rows} lines); back next cycle"),
 }
 
 STATUS_TEXT: dict[str, tuple[str, str]] = {
@@ -64,20 +66,27 @@ CHAR_WIDTH_RATIO = 0.62          # a monospace glyph, as a fraction of the font 
 SIDE_PADDING = 18
 
 
-def columns_for(settings: Settings) -> int:
-    """How many monospace columns fit across the readout."""
+def columns_for(settings: Settings, gutter: int = 0) -> int:
+    """How many monospace columns fit across the readout.
+
+    ``gutter`` is the strip the readout gives up at its right-hand edge for the box column.
+    It has to be subtracted here rather than left to the window's own ellipsis: the fields
+    are what the player reads, and a line that runs under the boxes gets clipped from the
+    right - which eats the block coordinate and the bearing first, the two things the row
+    exists for.
+    """
     per_char = max(4.0, settings.font_size * CHAR_WIDTH_RATIO)
-    return max(20, int((settings.width - SIDE_PADDING) / per_char))
+    return max(20, int((settings.width - SIDE_PADDING - gutter) / per_char))
 
 
-def name_budget(settings: Settings, tail: str) -> int:
+def name_budget(settings: Settings, tail: str, gutter: int = 0) -> int:
     """Columns left for the name, given everything that follows it on the line.
 
     ``tail`` is the whole remainder - the block, the separator and the third field -
     because leaving any of it out of the subtraction is what let a long name overflow
     in the first place.
     """
-    spare = columns_for(settings) - display_width(tail) - len(" | ")
+    spare = columns_for(settings, gutter) - display_width(tail) - len(" | ")
     return max(NAME_FLOOR, min(NAME_LIMIT, spare))
 
 
@@ -146,7 +155,7 @@ def title_line(plan: Plan, settings: Settings, account: str = "") -> str:
     return "DFBossReminder"
 
 
-def boss_line(settings: Settings, row) -> str:  # noqa: ANN001
+def boss_line(settings: Settings, row, gutter: int = 0) -> str:  # noqa: ANN001
     """One boss in the requested format, chosen by its tier.
 
     Every field is separated by ``|`` and the count stays in the name because the
@@ -156,17 +165,17 @@ def boss_line(settings: Settings, row) -> str:  # noqa: ANN001
     field = row.end_clock() if row.is_big else row.direction("compact")
     name = row.short_name if row.is_big else row.name
     tail = f"{block_text(row.block)} | {field}"
-    return f"{_fit(name, name_budget(settings, tail))} | {tail}"
+    return f"{_fit(name, name_budget(settings, tail, gutter))} | {tail}"
 
 
-def waypoint_line(label: str, block, bearing, settings: Settings) -> str:
+def waypoint_line(label: str, block, bearing, settings: Settings, gutter: int = 0) -> str:
     """A known place in the same shape, so the strip reads as one table."""
     tail = f"{block_text(block)} | {bearing.compact()}"
-    return f"{_fit(label, name_budget(settings, tail))} | {tail}"
+    return f"{_fit(label, name_budget(settings, tail, gutter))} | {tail}"
 
 
 def rows_for(plan: Plan, settings: Settings, status: str = "", stale: bool = False,
-             extras: bool = True) -> tuple[Row, ...]:
+             extras: bool = True, gutter: int = 0) -> tuple[Row, ...]:
     """The body of the readout: bosses first, then the waypoints and notes.
 
     ``extras`` is what the in-game window turns off. The player asked for the overlay to
@@ -174,6 +183,10 @@ def rows_for(plan: Plan, settings: Settings, status: str = "", stale: bool = Fal
     over the game is only the lines they read while playing, while the console keeps the
     full picture. The console is where the tool is checked, and it is the only place left
     that says whether an empty list is correct or the feed is broken.
+
+    ``gutter`` is the space the window keeps at its right edge for the box column, and
+    ``key`` on a row is the spawn it belongs to - the thing a tick in that column hides.
+    Only bosses carry one: a tick on a note or a waypoint would have nothing to hide.
     """
     rows: list[Row] = []
     for boss in plan.rows:
@@ -181,13 +194,14 @@ def rows_for(plan: Plan, settings: Settings, status: str = "", stale: bool = Fal
         # for a specific cell is a stronger statement than "this is a big boss".
         colour = (settings.style_colour(boss.block)
                   or (settings.colour("big") if boss.is_big else settings.colour("list")))
-        rows.append(Row(boss_line(settings, boss), colour))
+        rows.append(Row(boss_line(settings, boss, gutter), colour, key=boss.cycle_key))
     if not extras:
         return tuple(rows)
     for label, block in settings.waypoints:
         if plan.player is None:
             continue
-        rows.append(Row(waypoint_line(label, block, Bearing.between(plan.player, block), settings),
+        rows.append(Row(waypoint_line(label, block, Bearing.between(plan.player, block),
+                                      settings, gutter),
                         settings.colour("note")))
     for note in plan.notes:
         rows.append(Row(note_text(note, settings.language), settings.colour("note")))

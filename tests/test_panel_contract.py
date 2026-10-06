@@ -207,6 +207,119 @@ def test_the_alignment_is_a_gdi_flag() -> None:
 def test_a_row_is_just_text_and_a_colour() -> None:
     row = Row("6 x Bandits | 1052 x 1018 | 5LD1")
     assert row.colour == (235, 235, 235)
+    assert row.key is None, "a row with nothing to dismiss carries no key"
+
+
+# ------------------------------------------------------------- the tick boxes
+
+
+def test_the_readout_keeps_the_flag_that_makes_it_click_through() -> None:
+    # The whole point of the box column being a second window: the readout is the window the
+    # player stares at for an hour, and WS_EX_TRANSPARENT is what makes "a click over it
+    # reaches the game" provable rather than hopeful. Adding a clickable box must not cost
+    # that - a window with this flag can never receive a click, so the box cannot live in it.
+    call = re.search(r"CreateWindowExW\((.*?)\)\n", PANEL_SOURCE, re.DOTALL)
+    assert "WS_EX_TRANSPARENT" in call.group(1)
+
+
+def test_the_box_column_is_a_window_that_may_be_clicked() -> None:
+    # The other half of the same statement: no WS_EX_TRANSPARENT here, because a window with
+    # it can never be clicked, plus every safety flag that stops a click doing anything else.
+    body = PANEL_SOURCE[PANEL_SOURCE.index("class CheckColumn"):]
+    call = re.search(r"CreateWindowExW\((.*?)\)\n", body, re.DOTALL)
+    assert call, "the box column must create its own window"
+    styles = call.group(1)
+    for flag in ("WS_EX_LAYERED", "WS_EX_TOPMOST", "WS_EX_TOOLWINDOW", "WS_EX_NOACTIVATE"):
+        assert flag in styles, f"the box column must be created with {flag}"
+    assert "WS_EX_TRANSPARENT" not in styles, (
+        "a WS_EX_TRANSPARENT window can never receive the click the box exists for")
+
+
+def test_a_click_on_a_box_is_taken_and_never_activates_the_window() -> None:
+    # WM_MOUSEACTIVATE -> MA_NOACTIVATE is what keeps a tick from taking the keyboard away
+    # from the game; acting on the *down* message is what stops the release that follows
+    # from landing on a box that moved up into the cursor's place and hiding a second boss.
+    assert panel_module.WM_LBUTTONDOWN == 0x0201
+    assert panel_module.WM_MOUSEACTIVATE == 0x0021
+    assert panel_module.MA_NOACTIVATE == 3
+    assert panel_module.HTTRANSPARENT == -1
+    body = PANEL_SOURCE[PANEL_SOURCE.index("    def _handle("):]
+    body = body[:body.index("\n    def ")]
+    assert "WM_MOUSEACTIVATE" in body and "MA_NOACTIVATE" in body
+    assert body.index("WM_LBUTTONDOWN") < body.index("DefWindowProcW")
+    assert "on_check(box.key)" in body
+    # Off a box the window must still be see-through for the mouse, whatever the alpha rule
+    # is doing: the two mechanisms are independent, and only one of them is load-bearing.
+    assert "return HTCLIENT if box_at(x, y, self.boxes) else HTTRANSPARENT" in body
+
+
+def test_a_message_that_raises_never_kills_the_readout() -> None:
+    # The window procedure runs inside DispatchMessage, on the loop's own thread: an
+    # exception there would come out of the pump and take the overlay down with it.
+    body = PANEL_SOURCE[PANEL_SOURCE.index("class CheckColumn"):]
+    body = body[:body.index("\n    def _handle(")]
+    assert "return self._handle(hwnd, message, wparam, lparam)" in body
+    assert "except Exception as error" in body, "the window procedure must not raise"
+
+
+def test_the_window_procedure_uses_the_handle_windows_passed_it() -> None:
+    # A window is sent WM_NCCREATE and WM_NCCALCSIZE *during* CreateWindowExW, before it
+    # returns a handle - so a window procedure that reaches for self.hwnd raises on its own
+    # creation, and CreateWindowExW then fails with no error number at all. The first live
+    # run of the box column died exactly that way, which is why this is pinned here: no test
+    # on this machine can execute a window procedure.
+    assert "def _handle(self, hwnd: int" in PANEL_SOURCE
+    assert "return self._handle(hwnd, message, wparam, lparam)" in PANEL_SOURCE
+    body = PANEL_SOURCE[PANEL_SOURCE.index("    def _handle(self, hwnd: int"):]
+    body = body[:body.index("\n    def ")]
+    assert "DefWindowProcW(wintypes.HWND(hwnd)" in body
+    assert "wintypes.HWND(self.hwnd)" not in body
+    # And the handle exists as a zero before the window is made, for anything else that runs
+    # early.
+    head = PANEL_SOURCE[PANEL_SOURCE.index("class CheckColumn"):]
+    head = head[:head.index("self._register_class()")]
+    assert "self.hwnd = 0" in head
+
+
+def test_the_boxes_are_filled_so_the_whole_box_can_be_clicked() -> None:
+    # An outline-only box has a transparent middle, and a click there falls through to the
+    # game - a target you have to hit the frame of is not a control. The fill is drawn with
+    # a non-zero alpha for exactly that reason, and the border keeps the row's own colour so
+    # a box says which row it belongs to.
+    assert panel_module.BOX_FILL_ALPHA > 0
+    body = PANEL_SOURCE[PANEL_SOURCE.index("    def _draw_box("):]
+    body = body[:body.index("\n    def ")]
+    assert "BOX_FILL" in body and "box.colour" in body
+    assert "range(top, bottom)" in body and "range(left, right)" in body, "the box is filled"
+
+
+def test_the_queue_is_pumped_because_a_window_without_a_pump_gets_no_clicks() -> None:
+    # A posted mouse message is only delivered by DispatchMessage, from the thread that owns
+    # the window. Nothing in this project pumped before the boxes existed - which is also
+    # why a cross-thread window call used to hang for ever: no one was draining the queue.
+    assert panel_module.PM_REMOVE == 0x0001
+    assert "PeekMessageW" in PANEL_SOURCE
+    assert "DispatchMessageW" in PANEL_SOURCE
+    assert "TranslateMessage" in PANEL_SOURCE
+    pump = PANEL_SOURCE[PANEL_SOURCE.index("def pump_messages("):]
+    pump = pump[:pump.index("\ndef ")]
+    assert "PeekMessageW" in pump and "DispatchMessageW" in pump
+    # And the loop that owns the window is where it is called from.
+    app_source = Path(inspect.getsourcefile(panel_module)).parent.parent.joinpath("app.py")
+    watch_source = app_source.read_text(encoding="utf-8")
+    assert "self._pump()" in watch_source and "pump_messages" in watch_source
+    assert "if self._dirty:" in watch_source, "a tick must redraw without waiting for a tick"
+
+
+def test_the_box_column_is_closed_with_the_readout() -> None:
+    # Two windows now, so 停止 has to take both down. The audit counts both classes on the
+    # game PC, and this pins the other end: the presenter closes the column before the
+    # readout it belongs to.
+    from dfbossreminder import app as app_module
+
+    body = inspect.getsource(app_module.OverlayPresenter.close)
+    assert "self.boxes.close()" in body and "self.overlay.close()" in body
+    assert body.index("self.boxes.close()") < body.index("self.overlay.close()")
 
 
 def test_the_panel_metrics_follow_the_configured_font_size() -> None:

@@ -49,6 +49,16 @@ here is an implementation fact at best.
 | `2026-09-22-font-weight-probe.txt` | `tools/pc/probe-font-weight.py` output: 21 surfaces for seven weights × three shadow styles. Weights 100–500 share one MD5 and one ink count, so a 300 request renders exactly the 400 raster; 700 and up make GDI synthesise a heavier face; the four-offset shadow adds 141 pixels of fringe over the single one |
 | `2026-09-22-overlay-weight-shadow-comparison.png` | The same line in the same font twice, at 3x: `weight 300 asked, single drop shadow` above `weight 400 asked, four-offset shadow`. The shadow is the only difference between the rows, which is where the visible lightening comes from |
 | `2026-09-22-overlay-weight300-on-client.png` | The readout over the game client at the shipped settings — `weight=300`, single drop shadow, right-aligned, transparent backing |
+| `2026-09-23-exe-build-position.txt` | `tools\pc\build-exe.cmd` rebuilding the exe after the 停止/position fixes (`Built … DFBossReminder.exe (11136567 bytes, 23/09/2026 12:35)`), with the old config exe removed |
+| `2026-10-06-probe-checkboxes.txt` | The tick boxes measured on the game PC **with the client running**: `WindowFromPoint` on a box resolves to `'DFBossReminderCheck…'` while the column's gaps and the readout's text resolve to `'UnityWndClass' 'Dead Frontier'`, a posted `WM_LBUTTONDOWN` takes the readout from 3 rows to 1 (the whole spawn), rolling the feed to the next cycle brings all 3 back, and stopping leaves no window behind. Ends `PASS` |
+| `2026-10-06-probe-checkboxes-standin.txt` | The same probe with no client window to anchor to: it stands a plain window in for the game and reaches the same conclusion, which is the mode to run when the game is closed |
+| `2026-10-06-checkbox-before.png` | What the player sees with the boxes on: three boss rows right-aligned, each with a small box at the right end, the text stopping short of it |
+| `2026-10-06-checkbox-after.png` | The same readout after ticking `6 x Bandits`: both of that spawn's rows gone, the separate `2 x Bandits` spawn still there, its box still there |
+| `2026-10-06-checkbox-next-cycle.png` | The next cycle: all three rows back, with nothing left dismissed |
+| `2026-10-06-checkbox-real-data.png` | The readout the player's own settings and the live map produce: 7 rows under the minimap, a box at the right of each in that row's colour (their red style rules included) |
+| `2026-10-06-real-dump.txt` | That run: `20px reserved for the tick boxes`, `boxes visible=True at (1567,331)-(1582,447), 7 box(es), click-through except on a box` |
+| `2026-10-06-config-gui-audit-live.txt` | The start/stop/arrow/re-anchor audit re-run for the two-window world: `2 readout window(s) (text + tick boxes)` after 開始, **0** after 停止, 2 again after a second 開始, and the readout still follows a moved game window by exactly (120, 80) |
+| `2026-10-06-exe-build-checkboxes.txt` | `tools\pc\build-exe.cmd` building the Desktop exe with the tick boxes (11153026 bytes, 06/10/2026 12:33), after `tools/deploy-to-pc.sh` reported the two trees byte-identical |
 | `2026-09-22-overlay-weight300-run.txt` | The run that produced it: `font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on` |
 
 The JSON plans were produced by the tool itself (`--once --json`); the probes wrote

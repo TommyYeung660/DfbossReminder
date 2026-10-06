@@ -1,0 +1,34 @@
+DFB interactive run 06/10/2026 �g�G 12:33:35.37
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1791261215-83582
+the window was built withdrawn; viewable=False
+101 labels, 0 starts recorded so far
+style rows rendered: 2 (2 rules configured)
+開始 (real controller): 運行中：overlay visible=True at (1242,331)-(1582,751); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; 19px reserved for the tick boxes; boxes visible=True at (1568,331)-(1582,751), 0 box(es), click-through except on a box; anchored to the game client; using the game's own font: VIPER NORA
+the position arrows were pressed; the real controller was nudged in place
+
+controller message: 運行中：overlay visible=True at (1242,331)-(1582,751); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; 19px reserved for the tick boxes; boxes visible=True at (1568,331)-(1582,751), 0 box(es), click-through except on a box; anchored to the game client; using the game's own font: VIPER NORA
+after 6s: the game window is still there and the readout kept drawing
+after 開始: 2 readout window(s) (text + tick boxes), text rect (1242, 331, 1582, 440)
+after four arrow presses: 2 readout window(s) (text + tick boxes), text rect (1222, 331, 1562, 440)
+after moving the game window by (120, 80): 2 readout window(s) (text + tick boxes), text rect (1222, 331, 1562, 440)
+after 重新校正位置 with the window moved: 2 readout window(s) (text + tick boxes), text rect (1362, 411, 1702, 520)
+  -> the readout followed the game window exactly ((120, 80))
+after putting the game window back: 2 readout window(s) (text + tick boxes), text rect (1362, 411, 1702, 520)
+after 重新校正位置 with the window back: 2 readout window(s) (text + tick boxes), text rect (1242, 331, 1582, 440)
+stopping: 已停止
+stopped, running=False
+after 停止: 0 readout window(s) (text + tick boxes)
+second 開始: 運行中：overlay visible=True at (1242,331)-(1582,751); font=VIPER NORA, CJK MS Gothic; weight=300 (asked 300); align=right; transparent backing (text only); text shadow on; 19px reserved for the tick boxes; boxes visible=True at (1568,331)-(1582,751), 0 box(es), click-through except on a box; anchored to the game client; using the game's own font: VIPER NORA
+after a second 開始: 2 readout window(s) (text + tick boxes), text rect (1242, 331, 1582, 440)
+final stop: 已停止
+after the final 停止: 0 readout window(s) (text + tick boxes)
+
+--- what the run printed ---
+fetched 23 boss events; player 1057,1017fetched 23 boss events; player 1057,1017
+
+PASS: the window has the styles table, the start button and the position arrows, and nothing of the whitelist
+EXITCODE=0
+
+EXITCODE=0

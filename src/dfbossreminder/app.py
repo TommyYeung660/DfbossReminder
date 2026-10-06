@@ -32,6 +32,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import __version__
+from .domain.dismissed import Dismissed
 from .domain.plan import Plan, build_plan
 from .domain.settings import (
     ALIGNMENTS,
@@ -51,7 +52,14 @@ from .services.gamefont import FONT_FAMILY as GAME_FONT_FAMILY
 from .services.gamefont import ensure_cached as ensure_game_font
 from .services.window import GameWindow, Rect, find_game_window, game_data_dir, screen_rect
 from .ui import layout, view
-from .ui.panel import Overlay, Row
+from .ui.panel import (
+    CheckColumn,
+    Overlay,
+    Row,
+    check_column_width,
+    check_gutter,
+    pump_messages,
+)
 
 DEFAULT_SETTINGS_PATH = "~/.dfbossreminder/settings.json"
 
@@ -260,6 +268,12 @@ class OverlayPresenter:
         self.log = log
         self.notes: list[str] = []
         self.overlay: Overlay | None = None
+        # The tick boxes live in their own narrow window because the readout is
+        # WS_EX_TRANSPARENT and can therefore never receive a click (see CheckColumn).
+        self.boxes: CheckColumn | None = None
+        # What a tick means, set by the loop: it is the loop that owns the dismissal state.
+        # Called on this window's own thread, from the message pump.
+        self.on_check = None                            # noqa: ANN001 - Callable[[key], None]
         self.window: GameWindow | None = None
         # A temporary adjustment on top of the configured offsets, moved by the settings
         # window's arrows. Deliberately **not** a setting and never saved: the position the
@@ -321,11 +335,44 @@ class OverlayPresenter:
                                font_face=self.settings.font_face,
                                prefer_ascii=self.settings.direction_style == "en",
                                text_shadow=self.settings.text_shadow,
-                               align=self.settings.align)
+                               align=self.settings.align,
+                               check_gutter=check_gutter(self.settings.font_size))
         if not self.settings.font_face:
             # Confirming a face needs a device context, so the font arrives through the
             # overlay rather than being passed into it.
             self.overlay.set_face(self._game_font_face())
+        self._place_boxes()
+
+    def _place_boxes(self) -> None:
+        """The tick-box column, laid against the readout's right edge.
+
+        It is created after the readout so it is above it in the topmost band: a click is
+        routed to the first window that accepts it, and the readout does not accept any.
+        """
+        if self.overlay is None:
+            return
+        column = check_column_width(self.settings.font_size)
+        left, top = self.overlay.left + self.overlay.width - column, self.overlay.top
+        if self.boxes is None:
+            self.boxes = CheckColumn(left, top, column, self.overlay.height,
+                                     font_size=self.settings.font_size, log=self.log)
+            self.boxes.on_check = self._clicked
+            return
+        self.boxes.place(left, top, column, self.overlay.height)
+
+    def _clicked(self, key) -> None:  # noqa: ANN001
+        """A box was ticked, on this window's own thread. Hand it to the loop."""
+        if self.on_check is not None:
+            self.on_check(key)
+
+    def _boxes_for(self, rows: tuple[Row, ...]) -> None:
+        """Put a box beside every row that can be dismissed, matching the readout."""
+        if self.boxes is None or self.overlay is None:
+            return
+        column = check_column_width(self.settings.font_size)
+        self.boxes.place(self.overlay.left + self.overlay.width - column, self.overlay.top,
+                         column, self.overlay.height)
+        self.boxes.set_boxes(rows, self.overlay.title_band, self.overlay.line_height)
 
     def _game_font_face(self) -> str:
         """The client's own HUD font, loaded privately from the client's own files.
@@ -364,9 +411,13 @@ class OverlayPresenter:
         # still drawn by the console presentation (view.console_lines), which is where
         # "is this empty because there are no bosses or because the feed is down" is
         # answered.
-        rows: tuple[Row, ...] = view.rows_for(plan, settings, status, stale, extras=False)
+        rows: tuple[Row, ...] = view.rows_for(plan, settings, status, stale, extras=False,
+                                              gutter=check_gutter(settings.font_size))
         rows = self._fit(rows, settings)
         self.overlay.set_content("", rows)
+        # The boxes are built from the rows that were actually drawn, after any trimming, so
+        # a box can never point at a row that is not on screen.
+        self._boxes_for(rows)
 
     def _fit(self, rows: tuple[Row, ...], settings: Settings) -> tuple[Row, ...]:
         """Size the window to its content, and say so if the maximum clips it.
@@ -425,17 +476,40 @@ class OverlayPresenter:
         if (left, top) == (self.overlay.left, self.overlay.top):
             return ""
         self.overlay.move_to(left, top)
+        if self.boxes is not None:
+            self.boxes.move_to(left + self.overlay.width - self.boxes.width, top)
         return f"moved to ({left}, {top})"
 
     def describe(self) -> str:
         if self.overlay is None:
             return "overlay not created"
-        return f"{self.overlay.describe()}; " + "; ".join(self.notes)
+        described = [self.overlay.describe()]
+        if self.boxes is not None:
+            described.append(self.boxes.describe())
+        return "; ".join(described) + "; " + "; ".join(self.notes)
 
-    def dump(self, path: str) -> str | None:
-        return self.overlay.dump(path) if self.overlay is not None else None
+    def dump(self, path: str, boxes_path: str = "") -> str | None:
+        """Write the surfaces as BMPs. ``boxes_path`` adds the tick-box column's own."""
+        if self.overlay is None:
+            return None
+        written = self.overlay.dump(path)
+        if boxes_path and self.boxes is not None:
+            self.boxes.dump(boxes_path)
+        return written
+
+    def pump_messages(self) -> int:
+        """Dispatch what Windows queued for this thread's windows.
+
+        The loop calls this between its sleep slices. Without it a tick in a box would sit
+        in the queue for ever: nothing arrives in a window procedure until its thread pumps,
+        which is also why the readout needed no pump at all until it grew a box to click.
+        """
+        return pump_messages()
 
     def close(self) -> None:
+        if self.boxes is not None:
+            self.boxes.close()
+            self.boxes = None
         if self.overlay is not None:
             self.overlay.close()
 
@@ -471,6 +545,7 @@ class Watch:
         presenter,
         path: Path,
         dump_frame: str = "",
+        dump_boxes: str = "",
         log=print,  # noqa: ANN001
     ) -> None:
         self.settings = settings
@@ -478,6 +553,7 @@ class Watch:
         self.presenter = presenter
         self.path = path
         self.dump_frame = dump_frame
+        self.dump_boxes = dump_boxes
         self.log = log
         self.events: list = []
         self.player = None
@@ -487,6 +563,21 @@ class Watch:
         self.failures = 0
         self.next_fetch = 0.0
         self.dumped = False
+        # The bosses the player has ticked away, and the reason they are not a setting: a
+        # dismissal belongs to one spawn, not to the boss's name for ever (see
+        # domain.dismissed). It lives here, in the loop, because the loop is what knows when
+        # a fetch succeeded - and the end of a cycle is exactly that.
+        self.dismissed = Dismissed()
+        # A box was ticked since the last draw. The pump runs inside the loop's sleep
+        # slices, so the redraw happens on the next slice instead of waiting for the tick.
+        self._dirty = False
+        # The click arrives on this window's own thread - the one running this loop - so the
+        # handler may touch this object directly. It is set here rather than by each caller
+        # so the console path, the settings window and the probe all get it.
+        if hasattr(presenter, "on_check"):
+            # A console presenter has no windows, so it has no such attribute; the overlay
+            # presenter always does.
+            presenter.on_check = self.dismiss
         # Requests from outside this loop, for the window's thread to answer. See
         # request_settings for why they cannot be done directly.
         self._requests: collections.deque = collections.deque()
@@ -511,12 +602,40 @@ class Watch:
         self.last_success = now
         self.last_error = ""
         self.failures = 0
+        # A spawn the feed no longer lists is over, so there is nothing left for its
+        # dismissal to hide. This is where a cycle ends as far as the readout is concerned,
+        # and it is the second reason a hidden boss always comes back: the first is that the
+        # next spawn of the same boss carries a different key in the first place.
+        for label in self.dismissed.keep_only(event.cycle_key for event in events):
+            self.log(f"{label}: no longer listed, so it is shown again if it returns")
         self.log(f"fetched {len(events)} boss events; player "
                  f"{player if player else 'position unknown'}")
 
     # -------------------------------------------------------------------- drawing
     def plan(self, now: float) -> Plan:
-        return build_plan(self.events, self.player, self.settings, time.time())
+        return build_plan(self.events, self.player, self.settings, time.time(),
+                          dismissed=self.dismissed.keys())
+
+    def dismiss(self, key) -> None:  # noqa: ANN001
+        """Hide one spawn - every row of it - until its cycle ends.
+
+        Called from the box column's window procedure, which runs on this loop's thread
+        (``pump_messages`` is called from the slices below), so there is no lock here and no
+        cross-thread window call. The ``_dirty`` flag is what turns the click into a redraw
+        within a tenth of a second rather than at the next tick.
+        """
+        event = next((one for one in self.events
+                      if getattr(one, "cycle_key", None) == key), None)
+        # The name is looked up here rather than carried through the window: the box knows
+        # its key and nothing else, which is what keeps the panel from having to know what a
+        # boss event is.
+        label = str(getattr(event, "name", "")) if event is not None else ""
+        if not self.dismissed.hide(key, label):
+            return
+        places = len(getattr(event, "blocks", ())) if event is not None else 0
+        self.log(f"ticked away {label or key}: hidden for this cycle "
+                 f"({places} place(s) in the feed)")
+        self._dirty = True
 
     def status(self, now: float) -> tuple[str, bool]:
         """``(status text, stale)`` - what the last line and the note colour say.
@@ -546,7 +665,7 @@ class Watch:
             # The overlay's own surface, not a screenshot: a layered window is not
             # reproduced by a screen capture on every display configuration.
             dump = getattr(self.presenter, "dump", None)
-            written = dump(self.dump_frame) if dump else None
+            written = dump(self.dump_frame, self.dump_boxes) if dump else None
             if written:
                 self.dumped = True
                 self.log(f"overlay surface written to {written}; {self.presenter.describe()}")
@@ -590,6 +709,11 @@ class Watch:
             if window is None:
                 return "找不到 Dead Frontier 視窗，位置未變"
         return move(settings, nudge, window)
+
+    def _pump(self) -> int:
+        """Let the boxes' clicks in. A no-op for a presentation with no windows."""
+        pump = getattr(self.presenter, "pump_messages", None)
+        return pump() if pump else 0
 
     def _loop_is_this_thread(self) -> bool:
         """Whether this call may touch the window directly.
@@ -643,6 +767,13 @@ class Watch:
                     time.sleep(0.1)
                     slept += 0.1
                     self._drain_requests()
+                    self._pump()
+                    if self._dirty:
+                        # A box was ticked: take it off the screen now, on this thread,
+                        # rather than at the next tick - which can be half a second away and
+                        # is the difference between a control and a suggestion.
+                        self._dirty = False
+                        self.tick(time.monotonic())
                 self.tick(time.monotonic())
         finally:
             self.presenter.close()
@@ -951,6 +1082,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", default="", metavar="PATH", help="write the plan as JSON")
     parser.add_argument("--dump-frame", default="", metavar="PATH",
                         help="write the overlay's own surface to a BMP once, then keep running")
+    parser.add_argument("--dump-boxes", default="", metavar="PATH",
+                        help="write the tick-box column's own surface as well, which is what "
+                             "says which pixels can take a click")
     parser.add_argument("--seconds", type=float, default=0.0, help="stop after this long (0 = run until stopped)")
     parser.add_argument("--show-config", action="store_true", help="print the effective settings and exit")
     parser.add_argument("--config", action="store_true",
@@ -1078,7 +1212,8 @@ def main(argv: list[str] | None = None, default_to_config: bool = False) -> int:
         print(str(error), file=sys.stderr)
         return 3
     print(f"DFBossReminder {__version__} - {presenter.describe()}")
-    watch = Watch(settings, client, presenter, path, dump_frame=args.dump_frame, log=print)
+    watch = Watch(settings, client, presenter, path, dump_frame=args.dump_frame,
+                  dump_boxes=args.dump_boxes, log=print)
     try:
         watch.run(args.seconds or None)
     except KeyboardInterrupt:

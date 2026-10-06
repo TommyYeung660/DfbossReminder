@@ -364,6 +364,51 @@ The consequence worth stating: starting the readout again returns it to the conf
 position. That is the same statement as the button, and it is the one that makes the
 configuration the source of truth.
 
+### D24 — The tick boxes are a second window, and a tick belongs to one cycle
+
+The player's sixth request: a box on every boss line, a left click on one hides that boss's
+related lines, and the hiding must not survive into the next cycle.
+
+**Why a second window.** The readout is created with ``WS_EX_TRANSPARENT``, and a window
+with that flag is skipped entirely by the mouse hit test - it can never receive a click at
+all. That flag is the whole reason "a click over the readout reaches the game" is provable
+rather than hopeful, and it is not worth trading for a control. So the boxes live in a
+window of their own, which does not have the flag, and which is kept out of the way by the
+*other* documented hit-test rule: a layered window's transparent pixels let the mouse
+through. The strip is cleared to nothing and only the boxes are drawn, so the only pixels
+that can take a click are boxes; and since a window's hit test can only swallow clicks
+where it has pixels, the worst case is one checkbox wide. This is measured, not assumed:
+``tools/pc/probe-checkboxes.py`` does ``WindowFromPoint`` on a box (the column), in the
+column's gaps and over the readout's text (the window underneath both times).
+
+The boxes are **filled**, not outlined, for the same reason: an outline is a frame with a
+transparent middle, and a click in the middle would fall through to the game.
+
+**Why the click has to be pumped.** Nothing arrives in a window procedure until its thread
+dispatches the queue, and until this feature nothing in the project pumped - which is also
+the deeper reason a cross-thread window call used to hang for ever (D22). The loop that owns
+both windows now pumps inside its sleep slices, and a tick sets a flag that makes the next
+slice redraw, so the row goes within a tenth of a second instead of at the next tick.
+
+**What a tick hides.** One *spawn*, not one line and not one name. A boss event in the live
+map lists every block it can be at - the ``6 x Bandits`` the player pointed at had three -
+so hiding one line and leaving its siblings is not what was asked for, and the example they
+gave is exactly this case. The name is not an identity either: the live map carries two
+separate ``2 x Bandits`` events at once, and hiding by name would take out a boss nobody
+pointed at. The key is therefore ``(game_id, the cycle's start time)``.
+
+**Why the next cycle shows it again.** Two independent mechanisms, because this is the part
+the player asked for explicitly:
+
+* the key contains the cycle's **start time**, so the next spawn of the same boss - same
+  name, same blocks - is a different key and nothing hides it;
+* after every successful fetch the dismissal is dropped if the feed no longer lists that
+  spawn, which is what the end of a cycle looks like from here.
+
+Neither is a timer, and neither is a setting: nothing here is written to the settings file,
+so a tick can never become a permanent preference by accident. The end of a dismissal is the
+cycle.
+
 ### D21 — Position is set by hand, not watched
 
 The readout used to re-anchor itself to the client every five seconds. By 2026-09-23 it

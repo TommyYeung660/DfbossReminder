@@ -98,13 +98,26 @@ def window_rect(hwnd: int) -> tuple[int, int, int, int]:
     return (rect.left, rect.top, rect.right, rect.bottom)
 
 
-def overlay_windows() -> list[tuple[int, tuple[int, int, int, int]]]:
-    """Every visible overlay window on this desktop, as (hwnd, rectangle).
+def text_rect(live: list) -> tuple[int, int, int, int] | None:
+    """The readout's own rectangle, out of both of its windows.
 
-    The class name is the overlay's own (``DFBossReminderOverlay<pid>_<n>``), so this
-    counts readout windows and nothing else. It is what turns "停止 does nothing" and "a
-    second overlay appeared" from things a person notices into things this reports - both
-    of which were real, and neither of which any test could have seen.
+    The position checks are about the text: the tick-box column is a narrow strip against
+    its right edge and would answer the question with the wrong numbers.
+    """
+    for _hwnd, rect, klass in live:
+        if klass.startswith("DFBossReminderOverlay"):
+            return rect
+    return None
+
+
+def overlay_windows() -> list[tuple[int, tuple[int, int, int, int], str]]:
+    """Every visible window the readout owns, as (hwnd, rectangle).
+
+    Both classes, because the readout is two windows now: the text
+    (``DFBossReminderOverlay<pid>_<n>``) and the tick-box column beside it
+    (``DFBossReminderCheck<pid>_<n>``). Counting only the first would report a clean stop
+    while a column was left floating over the game - which is exactly the kind of quiet
+    leftover this tool exists to catch.
     """
     import ctypes
     from ctypes import wintypes
@@ -117,17 +130,18 @@ def overlay_windows() -> list[tuple[int, tuple[int, int, int, int]]]:
     user32.IsWindowVisible.argtypes = [wintypes.HWND]
     user32.IsWindowVisible.restype = wintypes.BOOL
 
-    found: list[tuple[int, tuple[int, int, int, int]]] = []
+    found: list[tuple[int, tuple[int, int, int, int], str]] = []
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def visit(hwnd, _lparam):  # noqa: ANN001, ANN202
         buffer = ctypes.create_unicode_buffer(256)
         user32.GetClassNameW(wintypes.HWND(hwnd), buffer, 256)
-        if buffer.value.startswith("DFBossReminderOverlay") and \
+        if buffer.value.startswith(("DFBossReminderOverlay", "DFBossReminderCheck")) and \
                 user32.IsWindowVisible(wintypes.HWND(hwnd)):
             rect = wintypes.RECT()
             user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect))  # noqa: B018
-            found.append((int(hwnd), (rect.left, rect.top, rect.right, rect.bottom)))
+            found.append((int(hwnd), (rect.left, rect.top, rect.right, rect.bottom),
+                          buffer.value))
         return True
 
     user32.EnumWindows(visit, 0)
@@ -154,13 +168,16 @@ class RecordingController:
         return "audit: stop was called"
 
     def nudge(self, settings, direction, step):  # noqa: ANN001, ANN201
-        from dataclasses import replace
-
+        
         from dfbossreminder.ui.layout import nudged
 
         x, y = nudged(settings.anchor, settings.offset_x, settings.offset_y, direction, step)
         self.nudges.append((direction, step))
-        return replace(settings, offset_x=x, offset_y=y), f"位移 {x}, {y}"
+        # A string, exactly as OverlayController.nudge answers - a stub that returns
+        # something else tests a window that cannot exist. It returned a tuple for a while
+        # after the real one changed, and the settings window's arrow callback blew up in a
+        # way that only showed up as a line in this tool's captured output.
+        return f"位移 {x}, {y}"
 
 
 def main() -> int:
@@ -174,6 +191,9 @@ def main() -> int:
                              "nudge it, then press 停止")
     parser.add_argument("--seconds", type=float, default=8.0,
                         help="how long to leave the overlay up with --live")
+    parser.add_argument("--windows", action="store_true",
+                        help="do not open anything: just list the readout windows that are "
+                             "on this desktop right now, and say where they are")
     args = parser.parse_args()
 
     if sys.platform != "win32":
@@ -191,6 +211,19 @@ def main() -> int:
 
     settings = parse_settings({"user_id": "14008279", "radius_blocks": 5,
                                "highlights": args.rules, "anchor": "below-minimap"})
+    if args.windows:
+        # "Is the readout actually up, and where?" - the question that has cost time more
+        # than once (a stale exe, an orphaned window from a previous run). Answered without
+        # creating a window of its own and before anything is built, so it can be asked
+        # while the player is playing.
+        live = overlay_windows()
+        print(f"{len(live)} readout window(s) on this desktop")
+        for hwnd, rect, klass in live:
+            print(f"  {hex(hwnd)} {klass} {rect}")
+        text = text_rect(live)
+        print(f"text rectangle: {text if text else 'none'}")
+        return 0
+
     path = Path(args.settings) if args.settings else Path("audit-settings.json")
     controller = RecordingController()
     captured = io.StringIO()
@@ -284,9 +317,9 @@ def main() -> int:
 
         def report(step: str) -> list:
             live = overlay_windows()
-            where = live[0][1] if live else None
-            print(f"{step}: {len(live)} overlay window(s)"
-                  + (f", rect {where}" if where else ""))
+            where = text_rect(live)
+            print(f"{step}: {len(live)} readout window(s) (text + tick boxes)"
+                  + (f", text rect {where}" if where else ""))
             return live
 
         print(f"\ncontroller message: {controller.message}")
@@ -299,9 +332,10 @@ def main() -> int:
                   f"{'still' if find_game_window() else 'no longer'} there and the readout "
                   f"kept drawing")
             up = report("after 開始")
-            if len(up) != 1:
-                problems.append(f"expected exactly one overlay window, found {len(up)}")
-            first_rect = up[0][1] if up else None
+            if len(up) != 2:
+                problems.append(f"expected two windows (text and tick boxes), found "
+                                f"{len(up)}")
+            first_rect = text_rect(up)
 
             # Move it away with an arrow, then press 重新校正位置: it has to come back to
             # exactly where the 顯示位置 settings say. This is the button that replaced the
@@ -314,7 +348,7 @@ def main() -> int:
                 button.invoke()
                 time.sleep(0.6)
             after_nudge = report("after four arrow presses")
-            if first_rect and after_nudge and after_nudge[0][1] != first_rect:
+            if first_rect and text_rect(after_nudge) not in (None, first_rect):
                 moved_away = True
             if not moved_away:
                 problems.append("the arrow did not move the overlay, so realign cannot be "
@@ -339,8 +373,9 @@ def main() -> int:
                     realign_button.invoke()
                     time.sleep(1.5)
                     moved = report("after 重新校正位置 with the window moved")
-                    if moved and first_rect:
-                        shifted = (moved[0][1][0] - first_rect[0], moved[0][1][1] - first_rect[1])
+                    now_rect = text_rect(moved)
+                    if first_rect and now_rect:
+                        shifted = (now_rect[0] - first_rect[0], now_rect[1] - first_rect[1])
                         if shifted != delta:
                             problems.append(f"re-anchoring moved the readout by {shifted}, "
                                             f"not the window's {delta}")
@@ -354,9 +389,9 @@ def main() -> int:
                     realign_button.invoke()
                     time.sleep(1.5)
                     back = report("after 重新校正位置 with the window back")
-                    if back and first_rect and back[0][1] != first_rect:
+                    if first_rect and text_rect(back) not in (None, first_rect):
                         problems.append(f"the readout did not return to {first_rect}: "
-                                        f"{back[0][1]}")
+                                        f"{text_rect(back)}")
 
             if realign_button is None:
                 problems.append("no 重新校正位置 button in the window")
@@ -371,8 +406,8 @@ def main() -> int:
             print(f"second 開始: {message}")
             time.sleep(2.0)
             again = report("after a second 開始")
-            if not ok or len(again) != 1:
-                problems.append(f"a second start left {len(again)} overlay window(s)")
+            if not ok or len(again) != 2:
+                problems.append(f"a second start left {len(again)} readout window(s)")
             print(f"final stop: {controller.stop()}")
             report("after the final 停止")
 

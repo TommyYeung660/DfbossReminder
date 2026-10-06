@@ -138,6 +138,24 @@ class BossEvent:
         return self.event_type.strip().lower() == _MISSION
 
     @property
+    def cycle_key(self) -> tuple[str, float]:
+        """What makes this spawn *this* spawn, rather than the next one.
+
+        The box column hides a boss by this key, and the player's rule for that is that a
+        dismissal must not survive into the next cycle. So the key is the game's own entry
+        id **together with the cycle's start time**, which is what changes when the boss
+        spawns again.
+
+        Neither half alone is enough. The name is not an identity: the live map carries two
+        separate ``"2 x Bandits"`` events at once, in different places, so hiding by name
+        would take out a boss the player never pointed at. And the end time is not one
+        either: the map is a third party's feed and may extend a live window, which would
+        make a hidden boss reappear in the middle of its own cycle. The start time of a
+        spawn does not move while the spawn is live.
+        """
+        return (self.game_id, self.start)
+
+    @property
     def duration_minutes(self) -> float:
         return (self.end - self.start) / 60.0
 
@@ -236,6 +254,17 @@ class Sighting:
     @property
     def is_mission(self) -> bool:
         return self.event.is_mission
+
+    @property
+    def cycle_key(self) -> tuple[str, float]:
+        """The spawn this sighting belongs to, so hiding one row can hide its siblings.
+
+        A single boss event lists every block it can be at - the live map's ``6 x Bandits``
+        had three - and the readout shows one row per block. The player pointed at one of
+        those rows and asked for the *related* ones to go too, which is exactly this key:
+        same spawn. A different spawn that happens to share the name keeps its rows.
+        """
+        return self.event.cycle_key
 
 
 def expand(events: list[BossEvent]) -> list[Sighting]:

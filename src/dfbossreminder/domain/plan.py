@@ -17,6 +17,7 @@ be Chinese without teaching the domain a language.
 from __future__ import annotations
 
 import time
+from collections.abc import Container
 from dataclasses import dataclass
 
 from .bosses import TIER_NORMAL, Sighting, expand, strip_count, tier_of
@@ -58,6 +59,9 @@ class BossRow:
     minutes_left: float
     tier: str = TIER_NORMAL
     end_epoch: float = 0.0
+    # Which spawn this row belongs to. Two rows of the same boss at two blocks share it,
+    # which is what makes "hide the related rows" a matter of comparing keys.
+    cycle_key: tuple[str, float] = ("", 0.0)
 
     @property
     def is_big(self) -> bool:
@@ -126,6 +130,7 @@ def _row(
         minutes_left=sighting.event.minutes_left(now),
         tier=tier_of(sighting.name, big_bosses),
         end_epoch=sighting.event.end,
+        cycle_key=sighting.cycle_key,
     )
 
 
@@ -134,6 +139,7 @@ def build_plan(
     player: Block | None,
     settings: Settings,
     now: float,
+    dismissed: Container = frozenset(),
 ) -> Plan:
     """Decide the rows: everything within the radius, nearest first.
 
@@ -142,6 +148,12 @@ def build_plan(
     which colour a matching boss instead of removing the rest. So the only question here
     is the radius one - "what is near me" - and ``settings.highlights`` never changes
     which rows exist, only how the view draws them.
+
+    ``dismissed`` is the one thing that does remove rows, and it is not a filter in that
+    sense: it is the box column's state, one tick at a time, and it is dropped at the end
+    of the cycle by ``domain.dismissed``. Dismissed rows are taken out *before* the radius
+    test, so a boss the player has put away is not also counted as "beyond the radius" -
+    one row must not be reported twice, in two counts that mean different things.
     """
     sightings = expand(events)
     notes: list[Note] = []
@@ -150,6 +162,14 @@ def build_plan(
     considered: list[BossRow] = [
         _row(sighting, player, now, settings.big_bosses) for sighting in sightings
     ]
+    put_away = [row for row in considered if row.cycle_key in dismissed]
+    if put_away:
+        # Named as bosses *and* rows: the player ticked one box and several lines went, and
+        # both numbers are true - saying only "1 hidden" looks like a broken count when
+        # four lines left the screen.
+        notes.append(Note("dismissed", (("bosses", len({row.cycle_key for row in put_away})),
+                                        ("rows", len(put_away)))))
+    considered = [row for row in considered if row.cycle_key not in dismissed]
 
     if player is None:
         # No position means no radius to measure. Listing everything at least names
