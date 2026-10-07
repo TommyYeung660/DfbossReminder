@@ -166,7 +166,11 @@ def boss_line(settings: Settings, row, gutter: int = 0) -> str:  # noqa: ANN001
     """
     field = row.end_clock() if row.is_big else row.direction("compact")
     name = row.short_name if row.is_big else row.name
-    tail = f"{block_text(row.block)} | {field}"
+    # The field note goes last, as its own field: `1 x Devil Hound | 1056 x 991 | 3L2U | WRU`.
+    # It is the player's own reading of the block (domain/fieldnotes.py), and it is the one
+    # field that is allowed to be absent - most blocks have nothing to say.
+    remark = f" | {row.remark}" if getattr(row, "remark", "") else ""
+    tail = f"{block_text(row.block)} | {field}{remark}"
     return f"{_fit(name, name_budget(settings, tail, gutter))} | {tail}"
 
 

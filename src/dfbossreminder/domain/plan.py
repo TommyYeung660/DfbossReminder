@@ -21,6 +21,7 @@ from collections.abc import Container
 from dataclasses import dataclass
 
 from .bosses import TIER_NORMAL, Sighting, expand, strip_count, tier_of
+from .fieldnotes import remark_for
 from .geometry import Bearing, Block, euclidean
 from .settings import Settings
 
@@ -62,6 +63,9 @@ class BossRow:
     # Which spawn this row belongs to. Two rows of the same boss at two blocks share it,
     # which is what makes "hide the related rows" a matter of comparing keys.
     cycle_key: tuple[str, float] = ("", 0.0)
+    # The player's own field note for this block: where in it the bandits stand, or which wall
+    # to trap a boss against (see ``domain.fieldnotes``). Empty for most of the map.
+    remark: str = ""
 
     @property
     def is_big(self) -> bool:
@@ -127,6 +131,10 @@ def _row(sighting: Sighting, player: Block | None, now: float) -> BossRow:
         tier=tier_of(sighting.event),
         end_epoch=sighting.event.end,
         cycle_key=sighting.cycle_key,
+        # A bandit row gets the bandit note; every other boss gets the wall note for that
+        # block. One note, never two: the line has room for one hint and the coordinate and
+        # bearing come first.
+        remark=remark_for(sighting.block, bandits="bandit" in sighting.name.lower()),
     )
 
 

@@ -112,6 +112,18 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | **VIPER NORA has no CJK glyphs**, so the Chinese labels cannot be drawn in it - the header and notes would be a row of empty boxes beside boss lines that look perfect. Two faces are kept and each row picks by its content | Recorded live | the render probe drew 個附近 as boxes; the capture shows the Chinese rows in MS Gothic |
 | The readout is right-aligned, so its rows share a right edge with the minimap | Recorded live | the same capture |
 
+### Verified on the game PC, 2026-10-07 (twelfth session: field notes and the bearing format)
+
+R13. The notes come from the player's own two Death Row maps, read by
+``tools/build-fieldnotes.py``.
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| **The live readout carries the new format and the notes**: `6 x Bandits \| 1057 x 1017 \| 1L2U \| L` and, in the same run, `3 x Mega Titan \| 1058 x 1015 \| 4U \| WLD` - the bandit row gets the bandit note, another boss in that area gets the wall note | Recorded live, real account and boss map | `docs/evidence/2026-10-07-fieldnotes-dump.txt` |
+| **The bandit table agrees with the game**: every `6 x Bandits` spawn block the live boss map reported (`1052,1017`, `1056,1016`, `1057,1017`) is in the table generated from the player's map | Recorded live | the same run; the check is in the session log |
+| The tables are 30 bandit blocks and 23 wall blocks, the wall area a subset of the bandit one, every code well-formed - and the reader's own transposed-anchor bug was caught by the live cross-check (it matched 1 of 3, now 3 of 3) | Unit + recorded live | `tests/test_checkboxes.py`, `tools/build-fieldnotes.py` |
+| **Not claimed**: the three-by-three split is exact. The marks sit at their true positions, so about half the cells are within a tenth of a boundary where `L` and `C` are a judgement call | Stated, not measured | design D27 |
+
 ### Verified on the game PC, 2026-10-07 (eleventh session: the automatic re-anchor)
 
 R12: "每30秒自動做一次overlay 位置校正, overlay 校正按鈕保留" - the feature deleted on 2026-09-23,

@@ -40,6 +40,42 @@ def bossmap(*entries) -> dict:  # noqa: ANN001
     return payload
 
 
+# ------------------------------------------------------- the player's field notes
+def test_the_field_note_tables_are_well_formed() -> None:
+    # The tables are generated from two screenshots by tools/build-fieldnotes.py and checked
+    # against the live boss map (every `6 x Bandits` spawn block the game reports is in the
+    # bandit table). These tests pin the shape of what that script produces, so a bad rerun
+    # cannot pass unnoticed.
+    from dfbossreminder.domain import fieldnotes
+
+    assert len(fieldnotes.BANDIT_SPAWNS) == 30, "one dot per area block on the player's map"
+    assert fieldnotes.WALLS, "the fighting map has wall notes"
+    for code in fieldnotes.BANDIT_SPAWNS.values():
+        assert code in {"C", "L", "R", "LU", "LD", "CU", "CD", "RU", "RD"}, code
+    for code in fieldnotes.WALLS.values():
+        assert code.startswith("W")
+        assert code[1:] in {"C", "L", "R", "LU", "LD", "CU", "CD", "RU", "RD"}, code
+    # The wall map covers blocks inside the bandit map's area: the same stretch of Death Row.
+    bandit_x = {block[0] for block in fieldnotes.BANDIT_SPAWNS}
+    wall_x = {block[0] for block in fieldnotes.WALLS}
+    assert wall_x <= bandit_x, "the fighting map is the same area"
+
+
+def test_a_block_with_a_bandit_note_and_a_wall_note_answers_by_row() -> None:
+    from dfbossreminder.domain import fieldnotes
+
+    shared = sorted(set(fieldnotes.BANDIT_SPAWNS) & set(fieldnotes.WALLS))
+    assert shared, "the two maps overlap, which is why one note has to win"
+    block = shared[0]
+
+    class Where:
+        x, y = block
+
+    assert fieldnotes.remark_for(Where(), bandits=True) == fieldnotes.BANDIT_SPAWNS[block]
+    assert fieldnotes.remark_for(Where(), bandits=False) == fieldnotes.WALLS[block]
+    assert fieldnotes.remark_for(Where(), bandits=False).startswith("W")
+
+
 # ------------------------------------------------------------------ the boxes
 def test_a_box_is_the_size_of_the_font_and_the_column_follows_it() -> None:
     # The box belongs to the row it sits next to, so it is sized from the same setting the
@@ -64,9 +100,9 @@ def test_the_readout_gives_up_room_for_the_boxes() -> None:
 
 def test_there_is_one_box_per_boss_row_and_it_lines_up_with_it() -> None:
     rows = (
-        panel.Row("6 x Bandits | 1057 x 1017 | 5LD1", key=("19", 100.0)),
+        panel.Row("6 x Bandits | 1057 x 1017 | 5L1D", key=("19", 100.0)),
         panel.Row("within 5 blocks", colour=(90, 90, 90)),          # a note: no key
-        panel.Row("4 x Bandits | 1056 x 1017 | 5LD1", key=("18", 100.0)),
+        panel.Row("4 x Bandits | 1056 x 1017 | 5L1D", key=("18", 100.0)),
     )
     boxes = panel.boxes_for(rows, title_band=2, line_height=15, font_size=10)
     assert [box.key for box in boxes] == [("19", 100.0), ("18", 100.0)]

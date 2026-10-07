@@ -1,7 +1,7 @@
 """The readout rows: the exact line the player sees, in the requested format.
 
 The format is the contract with the player, so these tests assert whole lines rather
-than "contains a substring": `6 x Bandits | 1052 x 1018 | 5LD1` is either produced
+than "contains a substring": `6 x Bandits | 1052 x 1018 | 5L1D` is either produced
 exactly or the readout is wrong.
 """
 
@@ -47,23 +47,53 @@ def plan_for(specs: list[dict], player: Block | None, **settings) -> object:
 
 
 def test_a_normal_boss_line_is_exactly_the_requested_format() -> None:
-    # The example from the requirement, checked field by field: name, absolute block,
-    # and the compact bearing that 1057,1017 -> 1052,1018 produces.
-    plan = plan_for([{"name": "6 x Bandits", "blocks": [(1052, 1018)]}], Block(1057, 1017),
+    # The example from the requirement, checked field by field: name, absolute block, and the
+    # compact bearing that 1057,1017 -> 1052,1018 produces. Three fields and no more: this
+    # block is outside the player's field notes, and most of the map is.
+    plan = plan_for([{"name": "6 x Bandits", "blocks": [(1052, 1018)]}], Block(1058, 1019),
                     radius_blocks=10)
     text = view.rows_for(plan, parse_settings({"radius_blocks": 10}))[0].text
-    assert text == "6 x Bandits | 1052 x 1018 | 5LD1"
+    assert text == "6 x Bandits | 1052 x 1018 | 6L1U | RD", (
+        "six blocks left and one up, and 1052,1018 carries the player's bandit note")
 
 
 def test_a_big_boss_line_shows_the_end_time_instead_of_a_bearing() -> None:
     # 18:00 is the boss's expiry, in local time, and the count prefix is dropped so
     # the line names the boss rather than a group size of one.
     end = time.mktime((2026, 9, 22, 18, 0, 0, 0, 0, -1))
-    plan = plan_for([{"name": "1 x Devil Hound", "blocks": [(1052, 1018)], "end_epoch": end,
+    plan = plan_for([{"name": "1 x Devil Hound", "blocks": [(1055, 1016)], "end_epoch": end,
                       "window_minutes": 180}],      # the daily window, not a city cycle's
                     Block(1057, 1017), radius_blocks=10)
     text = view.rows_for(plan, parse_settings({"radius_blocks": 10}))[0].text
-    assert text == "Devil Hound | 1052 x 1018 | 18:00"
+    # 1055,1016 carries a wall note as well, so the line shows all four fields.
+    assert text == "Devil Hound | 1055 x 1016 | 18:00 | WC"
+
+
+def test_the_field_note_is_the_last_field_and_only_when_there_is_one() -> None:
+    # The player's own reading of a block (their two Death Row maps): where the bandits stand,
+    # or which wall to trap a boss against. A bandit row gets the bandit note, any other boss
+    # the wall note for the same block - one note, never two.
+    #   1057,1017: a bandit spawn AND a wall
+    #   1052,1017: a bandit spawn only
+    bandits = plan_for([{"name": "6 x Bandits", "blocks": [(1057, 1017)]}], Block(1057, 1017),
+                       radius_blocks=10)
+    assert view.rows_for(bandits, parse_settings({}))[0].text.endswith("| L")
+    other = plan_for([{"name": "3 x Irradiated Titan", "blocks": [(1057, 1017)]}],
+                     Block(1057, 1017), radius_blocks=10)
+    assert view.rows_for(other, parse_settings({}))[0].text.endswith("| WRU"), (
+        "the same block, a different boss: the wall note, not the bandit's")
+    bandit_only = plan_for([{"name": "6 x Bandits", "blocks": [(1052, 1017)]}],
+                           Block(1057, 1017), radius_blocks=10)
+    assert view.rows_for(bandit_only, parse_settings({}))[0].text.endswith("| CU")
+    assert plan_for([{"name": "6 x Bandits", "blocks": [(1052, 1017)]}], Block(1057, 1017),
+                    radius_blocks=10).rows[0].remark == "CU"
+    other_only = plan_for([{"name": "3 x Irradiated Titan", "blocks": [(1052, 1017)]}],
+                          Block(1057, 1017), radius_blocks=10)
+    assert other_only.rows[0].remark == "", "no wall note in that block, so no field"
+    # And a block with no note has no trailing field at all.
+    plain = plan_for([{"name": "6 x Bandits", "blocks": [(1000, 1000)]}], Block(1000, 1000),
+                     radius_blocks=5)
+    assert view.rows_for(plain, parse_settings({}))[0].text == "6 x Bandits | 1000 x 1000 | 0"
 
 
 def test_the_tier_is_the_spawns_own_window_length() -> None:
@@ -103,10 +133,10 @@ def test_a_big_boss_is_listed_before_a_closer_normal_one() -> None:
 def test_the_bearing_is_agnostic_to_the_display_style_setting() -> None:
     # The strip is too narrow for the words, so the compact form is used whatever the
     # console's direction_style says; the setting only changes the console.
-    plan = plan_for([{"name": "6 x Bandits", "blocks": [(1052, 1018)]}], Block(1057, 1017),
+    plan = plan_for([{"name": "6 x Bandits", "blocks": [(1052, 1018)]}], Block(1058, 1019),
                     radius_blocks=10, direction_style="zh")
     text = view.rows_for(plan, parse_settings({"radius_blocks": 10}))[0].text
-    assert text.endswith("5LD1")
+    assert text.endswith("6L1U | RD")
 
 
 def test_the_colours_come_from_the_theme() -> None:
@@ -156,8 +186,8 @@ def test_the_title_stays_within_the_width_at_every_shipped_size() -> None:
 def test_the_waypoint_uses_the_same_shape_as_a_boss() -> None:
     plan = plan_for([], Block(1057, 1017), radius_blocks=10)
     texts = [row.text for row in view.rows_for(plan, parse_settings({"radius_blocks": 10}))]
-    # 3 left, 30 up: the same `{n}L` + `U{n}` shape as a boss's `5LD1`.
-    assert "Secronom Bunker | 1054 x 987 | 3LU30" in texts
+    # 3 left, 30 up: the same `{n}L` + `{n}U` shape as a boss's `5L1D`.
+    assert "Secronom Bunker | 1054 x 987 | 3L30U" in texts
 
 
 def test_the_notes_follow_the_rows_in_the_note_colour() -> None:
@@ -252,7 +282,7 @@ def test_a_name_that_would_overflow_gives_way_to_the_coordinate_and_bearing() ->
                       "blocks": [(1048, 1018)]}], Block(1057, 1017), radius_blocks=20)
     settings = parse_settings({"radius_blocks": 20})
     text = view.rows_for(plan, settings)[0].text
-    assert text.endswith("| 1048 x 1018 | 9LD1")
+    assert text.endswith("| 1048 x 1018 | 9L1D")
     assert view.display_width(text) <= view.columns_for(settings)
 
 

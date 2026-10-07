@@ -44,6 +44,10 @@ Read as engineering statements:
 * **R9** — one program: opening the config and pressing 開始 opens the overlay.
 * **R10** — a tick box on every boss line: one click hides that boss's other lines too, and
   only until its next cycle (2026-10-06).
+* **R13** — the bearing reads ``1L1U`` rather than ``1LU1`` (2026-10-07), and a row can carry a
+  **field note** after it: where inside that block the ``6 x Bandits`` spawn sits (``RU``, ``L``,
+  ``C``) or which wall to trap a boss against (``WRU``, ``WL``, ``WC``), read off the player's own
+  two Death Row maps.
 * **R12** — the readout re-anchors itself every 30 seconds, and the 重新校正位置 button stays
   (2026-10-07).
 * **R11** — an ultra (big) boss is shown whatever the distance: "ultra boss 無法顯示,
@@ -418,6 +422,38 @@ fourteen rows:
 Two counts stay honest about it: ``beyond_radius`` counts ordinary bosses out of range only, and
 ``nearby_sightings`` counts the rows the radius accounts for, so the console title never calls a
 boss forty blocks away "nearby". A ``big_far`` note tells the console why such a row is there.
+
+### D27 — The field notes come from the player's own maps, and the reading is checked
+
+Two annotated screenshots the player sent on 2026-10-07 (kept in ``docs/evidence/``): their
+*Bandits Spawn Locations* map, one red dot per block marking where the ``6 x Bandits`` stand
+inside it, and their *Boss Fighting Map*, small red bar clusters marking the wall a boss can be
+trapped against (its green dots are the player's own positions and are ignored).
+
+``tools/build-fieldnotes.py`` reads both and generates ``domain/fieldnotes.py``. The parts worth
+recording are the ones that went wrong first:
+
+* **the grid is measured, not assumed.** The maps are stitched from 120 px tiles and each
+  screenshot is cropped differently - the fighting map sits 37 px right and 6 px down from the
+  spawn map - so each carries its own phase, taken from the long straight seams. A phase fitted
+  to the marks themselves agrees to within 4 px, and every mark then sits at least 19 px inside
+  its cell;
+* **the anchor is the player's own**, and it is checked against the game: the bottom-right-most
+  dot is block ``1058,1019``, and under that anchor every ``6 x Bandits`` spawn block the live
+  boss map reports is in the table. The first version of the reader had this transposed
+  (row/column) and matched one of three - the cross-check against the live map is what caught it;
+* **red is not enough on its own.** The region outlines are drawn in the same pure red as the
+  marks, and so are the maps' own labels. Blobs are filtered by size, by whether they sit on map
+  art rather than black, and - decisively - by whether they lie *on a block boundary*, because
+  the outlines run along the grid and the marks sit inside cells;
+* **the code is a coarse reading of a continuous position.** The marks are at their true spots,
+  so a three-by-three description cuts somewhere; roughly half the cells are within a tenth of a
+  boundary, where ``L`` and ``C`` are a judgement call rather than a fact. That is inherent in
+  asking for three letters, and the tables live in a generated file the player can correct.
+
+A row shows **one** note, never two: the bandit note when the row is a bandit spawn, the wall note
+for the same block otherwise - rule 3 in the player's words, and the only reading under which both
+maps are useful, since their areas overlap almost entirely.
 
 ### D26 — The automatic re-anchor is the button on a timer, with three guards
 

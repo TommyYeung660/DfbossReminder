@@ -79,20 +79,23 @@ class Bearing:
         return EAST if self.dx > 0 else WEST if self.dx < 0 else ""
 
     def compact(self) -> str:
-        """The HUD bearing: ``5LD1`` is five blocks left and one down.
+        """The HUD bearing: ``5L1D`` is five blocks left and one down.
 
-        Horizontal comes first, then vertical, each with its count, and a count of
-        zero is omitted. A boss standing at the player's own block reads ``0``.
-        This is the form the readout uses, and it is deliberately derivable: the
-        player's own block minus the boss's gives the two numbers directly, which is
-        how the format was confirmed against a hand-written example
-        (``1057,1017`` -> ``1052,1018`` = ``5LD1``).
+        Each axis carries its own count, horizontal first: ``{n}{L|R}{n}{U|D}``, and an axis
+        with a count of zero is left out (``3L``, ``2U``). A boss standing at the player's own
+        block reads ``0``.
+
+        The player asked for this on 2026-10-07 - "在 1LU1(這點也要改, 格式改為 1L1U)" - because
+        the old form put the direction *between* the numbers (``1LU1``), which reads as one
+        number with a stray letter in it. The numbers now stay next to the direction they
+        belong to, and the format is still derivable: the player's own block minus the boss's
+        gives the two numbers directly.
         """
         parts: list[str] = []
         if self.dx:
             parts.append(f"{abs(self.dx)}{'R' if self.dx > 0 else 'L'}")
         if self.dy:
-            parts.append(f"{'D' if self.dy > 0 else 'U'}{abs(self.dy)}")
+            parts.append(f"{abs(self.dy)}{'D' if self.dy > 0 else 'U'}")
         return "".join(parts) if parts else "0"
 
     def describe(self, style: str = "zh", separator: str = "") -> str:

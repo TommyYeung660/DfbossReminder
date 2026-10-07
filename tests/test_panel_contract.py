@@ -98,7 +98,7 @@ def test_a_row_with_chinese_is_drawn_in_a_face_that_can_draw_it() -> None:
     # The client's own HUD font (VIPER NORA) has no CJK glyphs, so the header and the
     # notes would be a row of empty boxes beside boss lines that look perfect. Two faces
     # are kept and each row picks by its content.
-    assert panel_module.needs_cjk("6 x Bandits | 1052 x 1018 | 5LD1") is False
+    assert panel_module.needs_cjk("6 x Bandits | 1052 x 1018 | 5L1D") is False
     assert panel_module.needs_cjk("20 格內") is True
     assert panel_module.needs_cjk("）") is True           # fullwidth punctuation too
     assert "font_cjk if needs_cjk(text) else self.font" in PANEL_SOURCE
@@ -205,7 +205,7 @@ def test_the_alignment_is_a_gdi_flag() -> None:
 
 
 def test_a_row_is_just_text_and_a_colour() -> None:
-    row = Row("6 x Bandits | 1052 x 1018 | 5LD1")
+    row = Row("6 x Bandits | 1052 x 1018 | 5L1D")
     assert row.colour == (235, 235, 235)
     assert row.key is None, "a row with nothing to dismiss carries no key"
 
@@ -395,7 +395,7 @@ def test_the_overlay_counts_a_cjk_character_as_two_columns() -> None:
     from dfbossreminder.ui import view
 
     assert view.display_width("3右2上") == 6
-    assert view.display_width("5LD1") == 4
+    assert view.display_width("5L1D") == 4
 
 
 def test_the_unavailable_path_is_reported_rather_than_hidden() -> None:
