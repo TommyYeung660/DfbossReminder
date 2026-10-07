@@ -34,8 +34,9 @@ _MISSION = "mission"
 # together; the panel wants one readable line per entry.
 _BREAK = re.compile(r"\s*<br\s*/?>\s*", re.IGNORECASE)
 
-# A boss name carries its own count, e.g. "6 x Bandits" or "1 x Devil Hound".
-_COUNT_PREFIX = re.compile(r"^\s*\d+\s*x\s*", re.IGNORECASE)
+# A boss name carries its own count, e.g. "6 x Bandits" or "1 x Devil Hound". The digits are
+# captured as well as matched: ``strip_count`` removes the prefix and ``boss_count`` reads it.
+_COUNT_PREFIX = re.compile(r"^\s*(\d+)\s*x\s*", re.IGNORECASE)
 
 TIER_NORMAL = "normal"
 TIER_BIG = "big"
@@ -48,10 +49,17 @@ TIER_BIG = "big"
 #     3.00 h    1 entry     "1 x Devil Hound" at 1056,991 with a single block
 #     0.08 h    2 entries   short special spawns (Six-Armed Bandit)
 #
-# So the rule is the player's own, from 2026-10-07: **a window longer than an hour**. "有些
-# Special Daily 是2小時的, 將規則簡化為大於一小時的boss 不受半徑限制即可". The threshold sits at
-# 1.5 h - inside the empty band between 1 h and 2 h - so that neither a city cycle nor a daily
-# can flip sides over a few minutes of drift, and it is still exactly "longer than an hour".
+# So the rule is the player's own, in two steps on 2026-10-07:
+#
+#   "有些Special Daily 是2小時的, 將規則簡化為大於一小時的boss 不受半徑限制即可"
+#   "2小時的 boss 群不應該當是ultra boss, 也要受半徑限制"
+#
+# - a window longer than an hour (threshold 1.5 h, inside the empty band between 1 h and 2 h, so
+#   neither a city cycle nor a daily can flip sides over a few minutes of drift), **and**
+# - a spawn of exactly one boss. The 2 h band is where the *groups* live: seven of its eight live
+#   entries spawn several different bosses in one event ("1 x Flaming Zombie<br />2 x Riot Shield
+#   Guy") and one spawns four of the same ("4 x Flaming Zombie"). A Special Daily is a single
+#   boss - one Devil Hound, one Behemoth - which is what makes it worth a row from anywhere.
 #
 # This replaced two earlier attempts that both used a *name* list, and both were wrong in the
 # same way: a name is not an identity. On 2026-10-07 the map carried three `1 x Devil Hound`
@@ -72,14 +80,31 @@ def strip_count(name: str) -> str:
     return " + ".join(_COUNT_PREFIX.sub("", segment).strip() for segment in name.split("+"))
 
 
-def tier_of(minutes: float) -> str:
-    """Whether this spawn is a special (big/ultra) boss: **is its window longer than an hour?**
+def boss_count(name: str) -> int:
+    """How many bosses this one event spawns, read from the name the map publishes.
 
-    Nothing else is consulted. The name does not decide it and no setting does: the map's own
-    timings already say which spawns are the special ones, and every attempt to name them was
-    wrong in the same way - see ``DAILY_WINDOW_MINUTES``.
+    The map carries the count per boss inside the name - ``"4 x Flaming Zombie"`` is four,
+    ``"1 x Flaming Zombie + 2 x Riot Shield Guy"`` is three, and a name with no count prefix
+    (a mission's, say) is one. Segments arrive joined by ``" + "`` because the payload separates
+    them with ``<br />``, so this is also how a *group* of different bosses is recognised.
     """
-    return TIER_BIG if minutes > DAILY_WINDOW_MINUTES else TIER_NORMAL
+    total = 0
+    for segment in name.split("+"):
+        match = _COUNT_PREFIX.match(segment)
+        total += int(match.group(1)) if match else 1
+    return max(1, total)
+
+
+def tier_of(event: BossEvent) -> str:
+    """Whether this spawn is a special (big/ultra) boss: a **single boss** on a **long window**.
+
+    Nothing else is consulted - no name, no setting - because the map's own timings and counts
+    already say which spawns are the special ones. Every attempt to name them was wrong in the
+    same way, and a name is not an identity: see ``DAILY_WINDOW_MINUTES``.
+    """
+    if event.is_mission or event.duration_minutes <= DAILY_WINDOW_MINUTES:
+        return TIER_NORMAL
+    return TIER_BIG if boss_count(event.name) == 1 else TIER_NORMAL
 
 
 def _clean_name(raw: object) -> str:

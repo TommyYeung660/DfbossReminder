@@ -21,6 +21,17 @@ set "OUT=%USERPROFILE%\Desktop"
 
 cd /d "%REPO%" || (echo cannot enter %REPO% & exit /b 1)
 
+REM A running exe holds its own file open, and PyInstaller then fails with a bare
+REM "PermissionError: [WinError 5]" from deep inside its own source - which reads like a
+REM toolchain problem and is not one. It has cost a build twice, so the build now stops a
+REM running readout itself and says so.
+for /f "tokens=2 delims=," %%P in ('tasklist /fi "imagename eq DFBossReminder.exe" /fo csv /nh 2^>nul') do (
+    echo stopping the running readout ^(pid %%~P^) so the exe can be replaced
+    powershell -ExecutionPolicy Bypass -NoProfile -File tools\pc\stop-dfboss.ps1 >nul 2>&1
+    goto :stopped
+)
+:stopped
+
 REM --onefile keeps it to one file to hand around. A console build is on purpose:
 REM the startup lines and any fetch error are then visible, and the overlay is a
 REM separate window either way. Running it with the console minimised is normal use.

@@ -82,6 +82,26 @@ def test_a_big_boss_is_shown_even_when_it_is_well_out_of_range() -> None:
     assert plan.nearby_sightings == 1, "the title must not call 30 blocks away 'nearby'"
 
 
+def test_a_two_hour_group_is_not_an_ultra_boss_and_stays_out_of_range() -> None:
+    # The player's second correction, with the live situation it came from: the two-hour band
+    # is where the *groups* are - seven of its eight live entries spawn several different bosses
+    # at once, one spawns four of the same - and "2小時的 boss 群不應該當是ultra boss, 也要受
+    # 半徑限制". The daily that should be exempt is the single boss on the long window.
+    player = Block(1000, 1000)
+    found = events(
+        {"name": "1 x Devil Hound", "blocks": [(1030, 1000)], "window_minutes": 180},
+        {"name": "1 x Flaming Zombie<br />2 x Riot Shield Guy",
+         "blocks": [(1040, 1000)], "window_minutes": 120},
+        {"name": "4 x Flaming Zombie", "blocks": [(1042, 1000)], "window_minutes": 120},
+        {"name": "1 x Snow Dreadstag", "blocks": [(1044, 1000)], "window_minutes": 120},
+    )
+    plan = build_plan(found, player, parse_settings({"radius_blocks": 5}), NOW)
+    assert [row.name for row in plan.rows] == ["1 x Devil Hound", "1 x Snow Dreadstag"], (
+        "the single bosses on long windows are exempt; the groups are not")
+    assert plan.beyond_radius == 2, "the group and the pack are ordinary bosses out of range"
+    assert next(note for note in plan.notes if note.code == "big_far").values()["count"] == 2
+
+
 def test_a_same_named_spawn_on_a_city_window_is_not_an_ultra_boss() -> None:
     # The player, 2026-10-07: "1056 X 991 的 Devil Hound 才要顯示, 其他地方是同名但非 ultra
     # boss, json 數據應該有分別". They were right, and the difference is the window: the live

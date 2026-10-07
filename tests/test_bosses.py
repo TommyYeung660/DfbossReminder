@@ -11,7 +11,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from dfbossreminder.domain.bosses import expand, parse_bossmap
+from dfbossreminder.domain.bosses import (
+    DAILY_WINDOW_MINUTES,
+    TIER_BIG,
+    TIER_NORMAL,
+    boss_count,
+    expand,
+    parse_bossmap,
+    tier_of,
+)
 from dfbossreminder.domain.geometry import Block
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -145,3 +153,60 @@ def test_events_come_back_in_expiry_order() -> None:
     events = parse_bossmap(load(), BEFORE_THE_FIXTURE)
     ends = [event.end for event in events]
     assert ends == sorted(ends)
+
+
+# ------------------------------------------------------------------ the tier
+def event_named(name: str, *, hours: float = 1.0, kind: str = "", include: bool = False):
+    """One parsed event, so the tier can be asked about a real payload shape."""
+    payload = {
+        "1": {
+            "game_id": "1",
+            "locations": [["1000", "1000"]],
+            "special_enemy_type": name,
+            "start_time": "0",
+            "end_time": str(hours * 3600),
+            "event_type": kind,
+        }
+    }
+    return parse_bossmap(payload, 0, include_missions=include)[0]
+
+
+def test_the_boss_count_is_read_from_the_name_the_map_publishes() -> None:
+    # Every field the tier needs is in the name: the map carries one count per boss and joins
+    # several bosses with <br />, which the parser turns into " + ".
+    assert boss_count("1 x Devil Hound") == 1
+    assert boss_count("4 x Flaming Zombie") == 4
+    assert boss_count("1 x Flaming Zombie + 2 x Riot Shield Guy") == 3
+    assert boss_count("Menace") == 1, "a name with no count is one boss"
+
+
+def test_a_single_boss_on_a_long_window_is_a_special_boss() -> None:
+    # The daily: one boss, three hours, one block.
+    assert tier_of(event_named("1 x Devil Hound", hours=3)) == TIER_BIG
+    # And the two-hour case the player mentioned: some special dailies last two hours, and a
+    # single boss on one is still special.
+    assert tier_of(event_named("1 x Snow Dreadstag", hours=2)) == TIER_BIG
+
+
+def test_a_two_hour_boss_group_is_not_a_special_boss() -> None:
+    # The player, 2026-10-07: "2小時的 boss 群不應該當是ultra boss, 也要受半徑限制". Seven of
+    # the eight two-hour entries in the live feed spawn several different bosses in one event,
+    # and one spawns four of the same; a Special Daily is a single boss.
+    assert tier_of(event_named("1 x Flaming Zombie + 2 x Riot Shield Guy", hours=2)) == TIER_NORMAL
+    assert tier_of(event_named("2 x Charred Mother + 1 x Charred Wraith", hours=2)) == TIER_NORMAL
+    assert tier_of(event_named("4 x Flaming Zombie", hours=2)) == TIER_NORMAL, (
+        "four of the same boss is still a group, not a daily")
+
+
+def test_a_city_cycle_is_not_a_special_boss_however_it_is_named() -> None:
+    # One hour is the ordinary cycle, and the count does not make it special either.
+    assert tier_of(event_named("1 x Devil Hound", hours=1)) == TIER_NORMAL
+    assert tier_of(event_named("6 x Bandits", hours=1)) == TIER_NORMAL
+    assert tier_of(event_named("1 x Devil Hound", hours=DAILY_WINDOW_MINUTES / 60)) == TIER_NORMAL
+
+
+def test_a_mission_is_never_a_special_boss() -> None:
+    # Eleven-hour windows belong to missions, which are not bosses at all.
+    mission = event_named("700 x 59", hours=11.58, kind="mission", include=True)
+    assert mission.is_mission
+    assert tier_of(mission) == TIER_NORMAL

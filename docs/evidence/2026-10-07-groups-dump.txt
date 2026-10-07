@@ -1,0 +1,19 @@
+DFB interactive run 07/10/2026 �g�T 16:08:40.85
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1791360520-14430
+DFBossReminder  1057,1017  6 個附近
+  6 x Bandits | 1058 x 1016 | 1RU1
+  2 x Charred Giant Spider | 1055 x 1016 | 2LU1
+  6 x Bandits | 1057 x 1014 | U3
+  3 x Irradiated Titan + 2 … | 1058 x 1014 | 1RU3
+  6 x Bandits | 1057 x 1013 | U4
+  3 x Irradiated Titan + 2 … | 1053 x 1019 | 4LD2
+  Secronom Bunker | 1054 x 987 | 3LU30
+  6 格內
+  座標樣式 6 組，命中 1 列
+  半徑外 188 個
+  已更新 0 秒前
+EXITCODE=0
+
+EXITCODE=0

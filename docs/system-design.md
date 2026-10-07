@@ -387,12 +387,20 @@ across a whole live payload (50 entries, 2026-10-07):
 | 3.00 h | 1 | `1 x Devil Hound` at `1056,991`, a single fixed block - the daily boss |
 | 0.08 h | 2 | short special spawns (Six-Armed Bandit) |
 
-The player's rule, 2026-10-07: *"有些 Special Daily 是2小時的, 將規則簡化為大於一小時的boss
-不受半徑限制即可"* - a spawn whose window is longer than an hour is a special boss. The threshold
-sits at 1.5 h, inside the empty band between 1 h and 2 h, so neither a city cycle nor a daily can
-flip sides over a few minutes of drift. **The name list is gone**, from the settings file and from
-the settings window with it: a knob that cannot affect anything is worse than no knob, and the map
-already answers the question.
+The player's rule, in two steps the same day: *"有些 Special Daily 是2小時的, 將規則簡化為大於
+一小時的boss 不受半徑限制即可"*, then *"2小時的 boss 群不應該當是ultra boss, 也要受半徑限制"*.
+Both statements hold at once, because the two-hour band is where the **groups** are:
+
+* **a window longer than an hour** - threshold 1.5 h, inside the empty band between 1 h and 2 h, so
+  neither a city cycle nor a daily can flip sides over a few minutes of drift;
+* **and a spawn of exactly one boss.** Of the eight two-hour entries in the live feed, seven spawn
+  several different bosses in one event (`1 x Flaming Zombie<br />2 x Riot Shield Guy`) and one
+  spawns four of the same (`4 x Flaming Zombie`). A Special Daily is a *single* boss - one Devil
+  Hound, one Behemoth - which is what makes it worth a row from anywhere. The count is in the name
+  the map publishes, per boss, so no extra field is needed.
+
+**The name list is gone**, from the settings file and from the settings window with it: a knob that
+cannot affect anything is worse than no knob, and the map already answers the question.
 
 **And a big boss is never hidden by the radius.** The radius decides which ordinary bosses are
 listed; a big boss is always listed. Two details keep that from flooding a strip that fits

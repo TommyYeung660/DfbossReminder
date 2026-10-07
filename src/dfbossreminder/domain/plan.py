@@ -123,8 +123,8 @@ def _row(sighting: Sighting, player: Block | None, now: float) -> BossRow:
         distance=bearing.blocks if bearing else None,
         bearing=bearing,
         minutes_left=sighting.event.minutes_left(now),
-        # The spawn's own window decides the tier: see tier_of.
-        tier=tier_of(sighting.event.duration_minutes),
+        # The spawn's own window and count decide the tier: see tier_of.
+        tier=tier_of(sighting.event),
         end_epoch=sighting.event.end,
         cycle_key=sighting.cycle_key,
     )
