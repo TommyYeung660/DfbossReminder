@@ -52,6 +52,19 @@ DEFAULT_BIG_BOSSES: tuple[str, ...] = ("Devil Hound", "Volatile Leaper", "Behemo
 TIER_NORMAL = "normal"
 TIER_BIG = "big"
 
+# The map *does* say which spawn is a daily one, just not in a field called "tier": it says
+# it in the length of the window. Measured on 2026-10-07 across a whole payload (50 entries):
+#
+#     1.00 h   26 entries   the city cycles, one per zone
+#     2.00 h    8 entries   the multi-boss event groups ("1 x Evolved Longarms + ...")
+#     3.00 h    1 entry     "1 x Devil Hound" at 1056,991 with a single block - the daily boss
+#     0.08 h    2 entries   short special spawns (Six-Armed Bandit)
+#
+# which is the wiki's own definition of the Special Daily Bosses: "stay for 3 hours instead
+# of the normal bosses' 1 hour". The threshold sits between the two long bands, with half an
+# hour of slack on each side, because a live window can be extended by the map while it runs.
+DAILY_WINDOW_MINUTES = 150.0
+
 
 def strip_count(name: str) -> str:
     """``"1 x Devil Hound"`` -> ``"Devil Hound"``.
@@ -63,15 +76,24 @@ def strip_count(name: str) -> str:
     return " + ".join(_COUNT_PREFIX.sub("", segment).strip() for segment in name.split("+"))
 
 
-def tier_of(name: str, big_bosses: tuple[str, ...]) -> str:
-    """Whether this boss is one of the configured big/ultra bosses.
+def tier_of(name: str, big_bosses: tuple[str, ...], minutes: float) -> str:
+    """Whether this spawn is a big/ultra boss: a configured name **on a daily window**.
 
     Matching is on the name **without** its count prefix and is case-insensitive, so
     ``"1 x Devil Hound"`` matches the configured ``"Devil Hound"``, and a client that
     changes the count does not silently drop the boss out of the tier.
+
+    The window length is not optional, and that is the point. A name alone is not a tier:
+    on 2026-10-07 the map carried three ``1 x Devil Hound`` entries at once, and only the one
+    on a three-hour window - a single fixed block in the Wasteland - was the daily boss. The
+    other two were ordinary city-cycle spawns of the same enemy, listed as ten and twelve
+    possible blocks, and treating them as ultra put two rows for a boss forty blocks away at
+    the top of the readout while the real one was nowhere (the player: "1056 X 991 的 Devil
+    Hound 才要顯示, 其他地方是同名但非 ultra boss"). The map's own signal is the window, so
+    the tier is the pair.
     """
     wanted = {value.strip().lower() for value in big_bosses if value.strip()}
-    if not wanted:
+    if not wanted or minutes < DAILY_WINDOW_MINUTES:
         return TIER_NORMAL
     for segment in strip_count(name).split("+"):
         if segment.strip().lower() in wanted:

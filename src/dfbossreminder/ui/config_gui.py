@@ -463,8 +463,9 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
 
     # ------------------------------------------------------------- big bosses
     big = section("大型／終極 boss（顯示結束時間）")
-    ttk.Label(big, text="一行一個名稱。boss 地圖沒有分級欄位，所以由這份清單決定\n"
-                        "哪些 boss 用結束時間的格式顯示。",
+    ttk.Label(big, text="一行一個名稱：這份清單決定哪些 boss 用「結束時間」的格式顯示，\n"
+                        "而且是每日 spawn（地圖上 3 小時的長視窗）才算 —— 同名但屬於\n"
+                        "城市循環（1 小時）的不算，也不會因此不受距離限制。",
               justify="left").pack(anchor="w")
     big_box = tk.Text(big, height=6, width=40)
     big_box.insert("1.0", "\n".join(settings.big_bosses or DEFAULT_BIG_BOSSES))

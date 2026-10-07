@@ -45,7 +45,8 @@ Read as engineering statements:
 * **R10** — a tick box on every boss line: one click hides that boss's other lines too, and
   only until its next cycle (2026-10-06).
 * **R11** — an ultra (big) boss is shown whatever the distance: "ultra boss 無法顯示,
-  應該是不受距離限制的" (2026-10-07).
+  應該是不受距離限制的" (2026-10-07); and "ultra" means a configured name **on a daily
+  spawn**, not the same name on a city cycle ("1056 X 991 的 Devil Hound 才要顯示").
 
 ## 2. The facts this design turns on
 
@@ -368,29 +369,43 @@ The consequence worth stating: starting the readout again returns it to the conf
 position. That is the same statement as the button, and it is the one that makes the
 configuration the source of truth.
 
-### D25 — A big boss is never hidden by the radius, and is one row when it is far
+### D25 — "Ultra boss" is a name **on a daily window**, and is never hidden by distance
 
-R11, in the player's words: *"ultra boss 無法顯示, 應該是不受距離限制的"*. The live map had a
-`1 x Devil Hound` 26 blocks away and their radius was 6, so the daily boss - the one worth
-crossing the map for, and the one whose window closes on a clock - was simply absent.
+Two rounds of the same mistake, both reported by the player. First *"ultra boss 無法顯示, 應該是不受
+距離限制的"*, then - after the exemption worked - *"1056 X 991 的 Devil Hound 才要顯示, 其他地方
+是同名但非 ultra boss, json 數據應該有分別"*. They were right on both counts, and the second one
+named where the answer had to come from: the payload.
 
-The rule is now: **the radius decides which ordinary bosses are listed; a big boss is always
-listed.** Two details keep that from flooding a strip that shows fourteen rows:
+**The map does say which spawn is the daily one; it says it in the length of the window.** Measured
+across a whole live payload (50 entries, 2026-10-07):
 
-* **an out-of-range big boss is one row, not one per block.** The tier is a configured name
-  list, and the live `1 x Devil Hound` listed twelve blocks inside a 15x12-block region -
-  twelve near-identical rows forty blocks from the player is not information. So an event with
-  blocks inside the radius is listed by those blocks (unchanged), and an event with *none*
-  inside it is listed once, by its nearest one;
-* **with no player position nothing changes.** There is no distance to be exempt from, and
-  that case belongs to ``show_all_without_player`` - which defaults to listing everything
-  anyway.
+| window | entries | what they are |
+| --- | --- | --- |
+| 1.00 h | 26 | the city cycles, one per zone - **including two `1 x Devil Hound` entries** with ten and twelve blocks |
+| 2.00 h | 8 | the multi-boss event groups (`1 x Evolved Longarms + 1 x Irradiated Mother + …`) |
+| 3.00 h | 1 | `1 x Devil Hound` at `1056,991`, a single fixed block - the daily boss |
+| 0.08 h | 2 | short special spawns (Six-Armed Bandit) |
 
-Two counts stay honest about it: ``beyond_radius`` counts ordinary bosses out of range only
-(the big ones are not a radius problem), and ``nearby_sightings`` counts the rows the radius
-accounts for, so the console title does not call a boss forty blocks away "nearby". The plan
-also carries a ``big_far`` note, so the console answers "why is this row here when my radius
-is 6?" without anyone having to read the code.
+That 3-versus-1 hour split is the wiki's own definition of a Special Daily Boss, which is what the
+name list was always trying to say. So the tier is now **both**: a name the player configured
+**and** a window of 3 hours (threshold 2.5 h, halfway between the two long bands, because the map
+may extend a live window). The name list keeps its meaning - "which bosses do I care about" - and
+the map supplies the part a name cannot: whether *this spawn* is the daily one.
+
+**And a big boss is never hidden by the radius.** The radius decides which ordinary bosses are
+listed; a big boss is always listed. Two details keep that from flooding a strip that fits
+fourteen rows:
+
+* **an out-of-range big boss is one row, not one per block.** The daily `1 x Devil Hound` lists a
+  single block, but a name on a long window can list several; an event with blocks inside the
+  radius is listed by those blocks (unchanged), and an event with none inside it is listed once,
+  by its nearest one;
+* **with no player position nothing changes** - there is no distance to be exempt from, and that
+  case belongs to ``show_all_without_player``, which defaults to listing everything anyway.
+
+Two counts stay honest about it: ``beyond_radius`` counts ordinary bosses out of range only, and
+``nearby_sightings`` counts the rows the radius accounts for, so the console title never calls a
+boss forty blocks away "nearby". A ``big_far`` note tells the console why such a row is there.
 
 ### D24 — The tick boxes are a second window, and a tick belongs to one cycle
 

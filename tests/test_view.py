@@ -19,15 +19,24 @@ NOW = 10_000.0
 
 
 def payload(*specs: dict) -> dict:
+    """A boss-map payload; ``window_minutes`` is the spawn's window, and the tier needs it.
+
+    The window is not decoration: a daily boss is a *long-window* spawn of a configured name
+    (see ``tier_of``), so a fixture with the default one-hour window is an ordinary city-cycle
+    boss however it is named - which is exactly the case the player pointed at when the map
+    carried three `1 x Devil Hound` entries and only one was the daily.
+    """
     out = {}
     for index, spec in enumerate(specs):
+        end = spec.get("end_epoch", NOW + spec.get("minutes_left", 60) * 60)
+        window = spec.get("window_minutes", 60)
         out[str(index)] = {
             "game_id": str(index),
             "locations": [[str(x), str(y)] for x, y in spec["blocks"]],
             "special_enemy_type": spec["name"],
             "special_enemy_amount": str(spec.get("amount", 1)),
-            "start_time": str(NOW - 600),
-            "end_time": str(spec.get("end_epoch", NOW + spec.get("minutes_left", 60) * 60)),
+            "start_time": str(end - window * 60),
+            "end_time": str(end),
         }
     return out
 
@@ -50,15 +59,17 @@ def test_a_big_boss_line_shows_the_end_time_instead_of_a_bearing() -> None:
     # 18:00 is the boss's expiry, in local time, and the count prefix is dropped so
     # the line names the boss rather than a group size of one.
     end = time.mktime((2026, 9, 22, 18, 0, 0, 0, 0, -1))
-    plan = plan_for([{"name": "1 x Devil Hound", "blocks": [(1052, 1018)], "end_epoch": end}],
+    plan = plan_for([{"name": "1 x Devil Hound", "blocks": [(1052, 1018)], "end_epoch": end,
+                      "window_minutes": 180}],      # the daily window, not a city cycle's
                     Block(1057, 1017), radius_blocks=10)
     text = view.rows_for(plan, parse_settings({"radius_blocks": 10}))[0].text
     assert text == "Devil Hound | 1052 x 1018 | 18:00"
 
 
-def test_the_tier_comes_from_the_configured_name_list() -> None:
+def test_the_tier_comes_from_the_configured_name_list_on_a_daily_window() -> None:
     end = time.mktime((2026, 9, 22, 3, 5, 0, 0, 0, -1))
-    specs = [{"name": "1 x Volatile Leaper", "blocks": [(1001, 1000)], "end_epoch": end}]
+    specs = [{"name": "1 x Volatile Leaper", "blocks": [(1001, 1000)], "end_epoch": end,
+              "window_minutes": 180}]
     default = plan_for(specs, Block(1000, 1000), radius_blocks=10)
     assert default.rows[0].is_big
     assert view.rows_for(default, parse_settings({"radius_blocks": 10}))[0].text.endswith("03:05")
@@ -67,11 +78,17 @@ def test_the_tier_comes_from_the_configured_name_list() -> None:
     off = parse_settings({"radius_blocks": 10, "big_bosses": []})
     assert not build_plan(parse_bossmap(payload(*specs), NOW), Block(1000, 1000), off, NOW).rows[0].is_big
 
-    # And a boss the player adds becomes big.
+    # And a boss the player adds becomes big - on a daily window, like the ones above: the
+    # name list says *which* bosses are wanted, the window says whether this spawn is the
+    # daily one, and a city-cycle spawn of the same name is neither.
     mine = parse_settings({"radius_blocks": 10, "big_bosses": ["Dreadstag"]})
     added = parse_bossmap(payload({"name": "2 x Dreadstag", "blocks": [(1001, 1000)],
-                                   "end_epoch": end}), NOW)
+                                   "end_epoch": end, "window_minutes": 180}), NOW)
     assert build_plan(added, Block(1000, 1000), mine, NOW).rows[0].is_big
+
+    short = parse_bossmap(payload({"name": "2 x Dreadstag", "blocks": [(1001, 1000)],
+                                   "end_epoch": end}), NOW)
+    assert not build_plan(short, Block(1000, 1000), mine, NOW).rows[0].is_big
 
 
 def test_a_big_boss_is_listed_before_a_closer_normal_one() -> None:
@@ -80,7 +97,8 @@ def test_a_big_boss_is_listed_before_a_closer_normal_one() -> None:
     end = NOW + 3600
     plan = plan_for(
         [{"name": "6 x Bandits", "blocks": [(1001, 1000)]},
-         {"name": "1 x Devil Hound", "blocks": [(1005, 1000)], "end_epoch": end}],
+         {"name": "1 x Devil Hound", "blocks": [(1005, 1000)], "end_epoch": end,
+          "window_minutes": 180}],
         Block(1000, 1000), radius_blocks=10)
     names = [row.name for row in plan.rows]
     assert names == ["1 x Devil Hound", "6 x Bandits"]
@@ -107,7 +125,8 @@ def test_the_colours_come_from_the_theme() -> None:
 
 def test_a_big_boss_can_be_given_its_own_colour() -> None:
     end = NOW + 3600
-    plan = plan_for([{"name": "1 x Devil Hound", "blocks": [(1001, 1000)], "end_epoch": end}],
+    plan = plan_for([{"name": "1 x Devil Hound", "blocks": [(1001, 1000)], "end_epoch": end,
+                      "window_minutes": 180}],
                     Block(1000, 1000), radius_blocks=10)
     settings = parse_settings({"radius_blocks": 10, "colours": {"list": "#33FF33",
                                                               "big": "#FFFF00"}})
@@ -247,7 +266,8 @@ def test_every_shipped_row_fits_the_shipped_width() -> None:
     end = time.mktime((2026, 9, 22, 18, 0, 0, 0, 0, -1))
     specs = [{"name": "6 x Bandits", "blocks": [(1002, 1017)]},
              {"name": "1 x Charred Titan", "blocks": [(1048, 1018)]},
-             {"name": "1 x Devil Hound", "blocks": [(1052, 1018)], "end_epoch": end},
+             {"name": "1 x Devil Hound", "blocks": [(1052, 1018)], "end_epoch": end,
+              "window_minutes": 180},
              {"name": "1 x Evolved Longarms + 1 x Irradiated Evolved Longarms",
               "blocks": [(1047, 1012)]}]
     settings = parse_settings({})

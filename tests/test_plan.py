@@ -17,7 +17,12 @@ NOW = 10_000.0
 
 
 def payload(*events: dict) -> dict:
-    """A boss-map payload from ``(name, blocks, end)`` triples."""
+    """A boss-map payload; ``window_minutes`` says how long the spawn's window is.
+
+    It matters to the tier: a big boss is a configured name **on a daily window** (see
+    ``tier_of``), so a fixture on the default one-hour window is an ordinary city-cycle spawn
+    however it is named.
+    """
     out = {}
     for index, event in enumerate(events):
         locations = event.get("blocks", [(1000, 1000)])
@@ -28,7 +33,10 @@ def payload(*events: dict) -> dict:
             "special_enemy_amount": str(event.get("amount", 1)),
             "boss_num": str(event.get("boss_num", 1)),
             "event_type": "mission" if event.get("mission") else "",
-            "start_time": str(NOW - 600),
+            # The window runs up to the expiry, so duration = window_minutes however much
+            # of it is left. 180 is the daily boss's window, 60 the ordinary city cycle.
+            "start_time": str(NOW + event.get("minutes_left", 60) * 60
+                              - event.get("window_minutes", 60) * 60),
             "end_time": str(NOW + event.get("minutes_left", 60) * 60),
         }
     return out
@@ -59,7 +67,7 @@ def test_a_big_boss_is_shown_even_when_it_is_well_out_of_range() -> None:
     player = Block(1000, 1000)
     found = events(
         {"name": "Near", "blocks": [(1002, 1002)]},
-        {"name": "1 x Behemoth", "blocks": [(1030, 1000)]},       # 30 blocks
+        {"name": "1 x Behemoth", "blocks": [(1030, 1000)], "window_minutes": 180},   # 30 blocks
     )
     plan = build_plan(found, player, parse_settings({"radius_blocks": 5}), NOW)
     assert [row.name for row in plan.rows] == ["1 x Behemoth", "Near"]
@@ -74,11 +82,31 @@ def test_a_big_boss_is_shown_even_when_it_is_well_out_of_range() -> None:
     assert plan.nearby_sightings == 1, "the title must not call 30 blocks away 'nearby'"
 
 
+def test_a_same_named_spawn_on_a_city_window_is_not_an_ultra_boss() -> None:
+    # The player, 2026-10-07: "1056 X 991 的 Devil Hound 才要顯示, 其他地方是同名但非 ultra
+    # boss, json 數據應該有分別". They were right, and the difference is the window: the live
+    # map carried three `1 x Devil Hound` entries, and only the one on a three-hour window -
+    # one fixed block in the Wasteland - was the daily boss. The other two were ordinary
+    # city-cycle spawns of the same enemy, on one-hour windows with ten and twelve blocks.
+    player = Block(1000, 1000)
+    found = events(
+        {"name": "1 x Devil Hound", "blocks": [(1030, 1000)], "window_minutes": 180},
+        {"name": "1 x Devil Hound", "blocks": [(1040, 1000), (1042, 1000)]},
+        {"name": "1 x Devil Hound", "blocks": [(1044, 1000), (1046, 1000)]},
+    )
+    plan = build_plan(found, player, parse_settings({"radius_blocks": 5}), NOW)
+    assert [row.block for row in plan.rows] == [Block(1030, 1000)], (
+        "only the daily spawn is exempt from the distance")
+    assert plan.rows[0].is_big
+    assert plan.beyond_radius == 4, "the same-named city spawns are ordinary bosses"
+    assert next(note for note in plan.notes if note.code == "big_far").values()["count"] == 1
+
+
 def test_a_far_big_boss_is_one_row_not_one_row_per_block() -> None:
     # The live `1 x Devil Hound` listed twelve blocks in one small region. Twelve
     # near-identical rows forty blocks away is not information; the nearest block is.
     player = Block(1000, 1000)
-    found = events({"name": "1 x Devil Hound",
+    found = events({"name": "1 x Devil Hound", "window_minutes": 180,
                     "blocks": [(1020, 1000), (1035, 1000), (1025, 1005)]})
     plan = build_plan(found, player, parse_settings({"radius_blocks": 5}), NOW)
     assert len(plan.rows) == 1
@@ -90,8 +118,8 @@ def test_a_big_boss_inside_the_radius_still_lists_its_blocks() -> None:
     # The exemption only adds rows for a boss that would otherwise be invisible: an event
     # with blocks in range is listed by those blocks, and must not also get a fallback row.
     player = Block(1000, 1000)
-    found = events({"name": "1 x Behemoth", "blocks": [(1002, 1000), (1004, 1000),
-                                                       (1040, 1000)]})
+    found = events({"name": "1 x Behemoth", "window_minutes": 180,
+                    "blocks": [(1002, 1000), (1004, 1000), (1040, 1000)]})
     plan = build_plan(found, player, parse_settings({"radius_blocks": 5}), NOW)
     assert [row.distance for row in plan.rows] == [2, 4]
     assert not [note for note in plan.notes if note.code == "big_far"]
@@ -102,7 +130,7 @@ def test_the_exemption_is_for_big_bosses_only() -> None:
     # "showing more things".
     player = Block(1000, 1000)
     found = events(
-        {"name": "1 x Behemoth", "blocks": [(1030, 1000)]},
+        {"name": "1 x Behemoth", "blocks": [(1030, 1000)], "window_minutes": 180},
         {"name": "6 x Bandits", "blocks": [(1030, 1000)]},
     )
     plan = build_plan(found, player, parse_settings({"radius_blocks": 5}), NOW)
@@ -113,7 +141,7 @@ def test_the_exemption_is_for_big_bosses_only() -> None:
 def test_no_player_position_is_still_the_setting_to_decide() -> None:
     # With no position there is no distance to be exempt from, so nothing changes: that
     # case belongs to show_all_without_player and is reported as such.
-    found = events({"name": "1 x Behemoth", "blocks": [(1030, 1000)]})
+    found = events({"name": "1 x Behemoth", "blocks": [(1030, 1000)], "window_minutes": 180})
     quiet = build_plan(found, None,
                        parse_settings({"radius_blocks": 5,
                                        "show_all_without_player": False}), NOW)
@@ -224,7 +252,8 @@ def test_a_very_close_boss_is_marked() -> None:
 
 def test_a_row_carries_its_expiry_for_the_end_time_readout() -> None:
     player = Block(1000, 1000)
-    found = events({"name": "1 x Devil Hound", "blocks": [(1001, 1000)], "minutes_left": 120})
+    found = events({"name": "1 x Devil Hound", "blocks": [(1001, 1000)], "minutes_left": 120,
+                    "window_minutes": 180})
     plan = build_plan(found, player, parse_settings({"radius_blocks": 20}), NOW)
     row = plan.rows[0]
     assert row.end_epoch == NOW + 7200

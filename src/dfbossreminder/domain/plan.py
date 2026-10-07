@@ -128,7 +128,8 @@ def _row(
         distance=bearing.blocks if bearing else None,
         bearing=bearing,
         minutes_left=sighting.event.minutes_left(now),
-        tier=tier_of(sighting.name, big_bosses),
+        # The spawn's own window is part of the tier: see tier_of.
+        tier=tier_of(sighting.name, big_bosses, sighting.event.duration_minutes),
         end_epoch=sighting.event.end,
         cycle_key=sighting.cycle_key,
     )
