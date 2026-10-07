@@ -1,0 +1,68 @@
+88 INFO: PyInstaller: 6.22.3, contrib hooks: 2026.7
+89 INFO: Python: 3.13.5
+104 INFO: Platform: Windows-10-10.0.19045-SP0
+104 INFO: Python environment: C:\Users\tommy.yeung\AppData\Local\Programs\Python\Python313
+104 INFO: wrote build\DFBossReminder.spec
+106 INFO: Module search paths (PYTHONPATH):
+['C:\\DFTools\\DfbossReminder',
+ 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\python313.zip',
+ 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\DLLs',
+ 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib',
+ 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313',
+ 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages',
+ 'C:\\DFTools\\DfbossReminder\\tools',
+ 'C:\\DFTools\\DfbossReminder\\src']
+274 INFO: checking Analysis
+287 INFO: Building because C:\DFTools\DfbossReminder\tools\dfboss_main.py changed
+287 INFO: Looking for Python shared library...
+287 INFO: Using Python shared library: C:\Users\tommy.yeung\AppData\Local\Programs\Python\Python313\python313.dll
+287 INFO: Running Analysis Analysis-00.toc
+287 INFO: Target bytecode optimization level: 0
+287 INFO: Initializing module dependency graph...
+288 INFO: Initializing module graph hook caches...
+296 INFO: Analyzing modules for base_library.zip ...
+932 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+1288 INFO: Processing standard module hook 'hook-math.py' from 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+2083 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+2605 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+2898 INFO: Caching module dependency graph...
+2918 INFO: Analyzing C:\DFTools\DfbossReminder\tools\dfboss_main.py
+3170 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+3233 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+3234 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+3407 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+3437 INFO: Processing module hooks (post-graph stage)...
+3439 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks'
+3445 INFO: Performing binary vs. data reclassification (927 entries)
+3479 INFO: Looking for ctypes DLLs
+3489 INFO: Analyzing run-time hooks ...
+3490 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+3492 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'C:\\Users\\tommy.yeung\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+3504 INFO: Creating base_library.zip...
+3516 INFO: Looking for dynamic libraries
+3647 INFO: Extra DLL search directories (AddDllDirectory): []
+3647 INFO: Extra DLL search directories (PATH): []
+3742 INFO: Warnings written to C:\DFTools\DfbossReminder\build\DFBossReminder\warn-DFBossReminder.txt
+3750 INFO: Graph cross-reference written to C:\DFTools\DfbossReminder\build\DFBossReminder\xref-DFBossReminder.html
+3768 INFO: checking PYZ
+3775 INFO: Building because C:\DFTools\DfbossReminder\src\dfbossreminder\__init__.py changed
+3775 INFO: Building PYZ (ZlibArchive) C:\DFTools\DfbossReminder\build\DFBossReminder\PYZ-00.pyz
+3904 INFO: Building PYZ (ZlibArchive) C:\DFTools\DfbossReminder\build\DFBossReminder\PYZ-00.pyz completed successfully.
+3914 INFO: checking PKG
+3926 INFO: Building because toc changed
+3926 INFO: Building PKG (CArchive) DFBossReminder.pkg
+5778 INFO: Building PKG (CArchive) DFBossReminder.pkg completed successfully.
+5790 INFO: Bootloader C:\Users\tommy.yeung\AppData\Local\Programs\Python\Python313\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\run.exe
+5790 INFO: checking EXE
+5805 INFO: Building because toc changed
+5805 INFO: Building EXE from EXE-00.toc
+5806 INFO: Copying bootloader EXE to C:\Users\tommy.yeung\Desktop\DFBossReminder.exe
+5838 INFO: Copying icon to EXE
+5863 INFO: Copying 0 resources to EXE
+5863 INFO: Embedding manifest in EXE
+5889 INFO: Appending PKG archive to EXE
+5985 INFO: Fixing EXE headers
+6186 INFO: Building EXE from EXE-00.toc completed successfully.
+6196 INFO: Build complete! The results are available in: C:\Users\tommy.yeung\Desktop
+Built "C:\Users\tommy.yeung\Desktop\DFBossReminder.exe"  (11155698 bytes, 07/10/2026 17:00)
+removed the old DFBossReminderConfig.exe: the settings window is in this exe now

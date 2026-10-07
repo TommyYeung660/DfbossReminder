@@ -88,6 +88,11 @@ class Settings:
 
     poll_seconds: float = 20.0
     stale_seconds: float = 120.0
+    # How often the readout re-measures the game window and puts itself back where 顯示位置
+    # says. 0 turns it off. It is a setting rather than a constant because the version of
+    # this feature that was deleted on 2026-09-23 was deleted for being impossible to switch
+    # off - and it is the player, not the code, who knows whether their client ever moves.
+    auto_align_seconds: float = 30.0
 
     presentation: str = "overlay"
     anchor: str = "below-minimap"
@@ -302,6 +307,8 @@ def parse_settings(payload: object) -> Settings:
                                          defaults.show_all_without_player),
         poll_seconds=_clamp_float(payload.get("poll_seconds"), defaults.poll_seconds, 5.0, 3600.0),
         stale_seconds=_clamp_float(payload.get("stale_seconds"), defaults.stale_seconds, 15.0, 3600.0),
+        auto_align_seconds=_clamp_float(payload.get("auto_align_seconds"),
+                                        defaults.auto_align_seconds, 0.0, 3600.0),
         presentation=_one_of(payload.get("presentation"), PRESENTATIONS, defaults.presentation),
         anchor=_one_of(payload.get("anchor"), ANCHORS, defaults.anchor),
         offset_x=_clamp_int(payload.get("offset_x"), defaults.offset_x, -4000, 4000),
@@ -338,6 +345,7 @@ def to_dict(settings: Settings) -> dict:
         "show_all_without_player": settings.show_all_without_player,
         "poll_seconds": settings.poll_seconds,
         "stale_seconds": settings.stale_seconds,
+        "auto_align_seconds": settings.auto_align_seconds,
         "presentation": settings.presentation,
         "anchor": settings.anchor,
         "offset_x": settings.offset_x,

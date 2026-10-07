@@ -1,0 +1,23 @@
+DFB interactive run 07/10/2026 ¶g¤T 16:57:14.25
+session: interactive desktop (scheduled task)
+
+DFB-RUN-1791363434-86799
+game window: {'left': 288, 'top': 63, 'width': 1280, 'height': 720}
+the shipped default interval is 30s
+placed at (302, 77, 662, 98)
+moving the client by (-70, -50) and waiting up to 40s for the timer
+the client is now reported at {'left': 218, 'top': 13, 'width': 1280, 'height': 720}
+after the wait: readout (232, 27, 592, 48), belongs at (232, 27)
+applying a (5, 5) nudge and moving the client again
+with the nudge: readout (237, 32, 597, 53), without it (232, 27)
+the client is now at {'left': 278, 'top': 53, 'width': 1280, 'height': 720}
+after the automatic pass: (297, 72, 657, 93) (plain position would be (292, 67), the nudge is (5, 5))
+with the client still: 1 automatic pass(es), notes ['']
+client put back at (215, -13, 1501, 736); readout at (237, 32, 597, 53)
+surfaces written to tools\pc\evidence\auto-align
+loop stopped, windows closed
+
+PASS: the readout re-anchors itself on the timer, keeps the player's nudge, and says nothing when the client has not moved
+EXITCODE=0
+
+EXITCODE=0

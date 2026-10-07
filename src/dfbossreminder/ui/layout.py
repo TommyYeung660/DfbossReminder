@@ -78,6 +78,23 @@ def place_below_minimap(
             int(client_top + minimap_top + minimap_size + gap + offset_y))
 
 
+def overlaps(
+    left: int, top: int, width: int, height: int,
+    other_left: int, other_top: int, other_width: int, other_height: int,
+) -> bool:
+    """Whether two rectangles share at least one pixel, from plain numbers.
+
+    Used to refuse an anchor that is nowhere near the screen. A minimised window measures as a
+    rectangle parked off to the side (``-32000`` on this machine), and placing the readout
+    against that puts it where nobody can see it - which is the one thing an automatic
+    re-anchor must never do.
+    """
+    if width <= 0 or height <= 0 or other_width <= 0 or other_height <= 0:
+        return False
+    return (left < other_left + other_width and other_left < left + width
+            and top < other_top + other_height and other_top < top + height)
+
+
 def place(
     anchor: str,
     area_left: int,

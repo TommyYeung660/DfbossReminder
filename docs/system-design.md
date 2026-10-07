@@ -44,6 +44,8 @@ Read as engineering statements:
 * **R9** — one program: opening the config and pressing 開始 opens the overlay.
 * **R10** — a tick box on every boss line: one click hides that boss's other lines too, and
   only until its next cycle (2026-10-06).
+* **R12** — the readout re-anchors itself every 30 seconds, and the 重新校正位置 button stays
+  (2026-10-07).
 * **R11** — an ultra (big) boss is shown whatever the distance: "ultra boss 無法顯示,
   應該是不受距離限制的" (2026-10-07); and "ultra" means a configured name **on a daily
   spawn**, not the same name on a city cycle ("1056 X 991 的 Devil Hound 才要顯示").
@@ -416,6 +418,32 @@ fourteen rows:
 Two counts stay honest about it: ``beyond_radius`` counts ordinary bosses out of range only, and
 ``nearby_sightings`` counts the rows the radius accounts for, so the console title never calls a
 boss forty blocks away "nearby". A ``big_far`` note tells the console why such a row is there.
+
+### D26 — The automatic re-anchor is the button on a timer, with three guards
+
+R12: *"每30秒自動做一次overlay 位置校正, overlay 校正按鈕保留"* (2026-10-07). This feature has a
+history worth keeping: the readout followed the client every few seconds until 2026-09-23, when the
+player had it deleted - it moved the list under them while they were reading it, it re-measured a
+window that had not moved, and there was no way to switch it off.
+
+What is back is not that. It is the **button's own code path** (measure the client again, then place
+the readout where 顯示位置 says) run on a timer, and the guards are what the old version lacked:
+
+* **it moves only when the client has actually moved.** ``reposition`` answers with a note only when
+  the corner it computes differs from the one the window is at, and the loop logs (and therefore
+  acts on) nothing else. A stationary client produces an empty note and a silent pass - measured:
+  one pass with the client still, `notes ['']`;
+* **it never touches the player's nudge.** The button clears 位置微調 because that is what a button
+  called 重新校正位置 means; the timer passes no nudge at all, so an arrow the player pressed
+  survives every pass. Measured live: a (5, 5) nudge was still applied after the client moved
+  60 px and the timer had re-anchored;
+* **it can be switched off**, and it is a setting rather than a constant (``auto_align_seconds``,
+  default 30, 0 = never) precisely because "there was no way to switch it off" is one of the
+  reasons the first version was deleted;
+* **it refuses a nonsense anchor.** A minimised window measures as a rectangle parked at
+  ``-32000``; anchoring to that would hide the readout where nobody can see it, so a client that
+  does not overlap the screen leaves the readout where it is and says so. The guard lives in the
+  shared move path, so the button refuses it too.
 
 ### D24 — The tick boxes are a second window, and a tick belongs to one cycle
 

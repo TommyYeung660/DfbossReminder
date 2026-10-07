@@ -170,6 +170,17 @@ def test_a_settings_file_from_an_older_build_still_loads() -> None:
     assert "big_bosses" not in to_dict(settings)
 
 
+def test_the_auto_align_interval_round_trips_and_zero_is_allowed() -> None:
+    # 30 seconds by default (the player asked for "每30秒自動做一次"), and 0 means "never" - the
+    # version of this feature that was deleted in 2026-09-23 was deleted for being impossible
+    # to switch off, so "off" has to survive the file.
+    assert Settings().auto_align_seconds == 30.0
+    assert parse_settings({"auto_align_seconds": 0}).auto_align_seconds == 0.0
+    assert parse_settings({"auto_align_seconds": "45"}).auto_align_seconds == 45.0
+    assert parse_settings({"auto_align_seconds": -5}).auto_align_seconds == 0.0
+    assert to_dict(parse_settings({"auto_align_seconds": 12.5}))["auto_align_seconds"] == 12.5
+
+
 def test_opacity_zero_is_allowed_because_that_is_the_transparent_mode() -> None:
     assert parse_settings({"opacity": 0}).opacity == 0.0
     assert parse_settings({"opacity": -1}).opacity == 0.0

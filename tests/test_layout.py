@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dfbossreminder.ui import layout
 from dfbossreminder.ui.layout import ANCHORS, nudged, place, place_below_minimap
 
 AREA = (100, 50, 800, 600)      # left, top, width, height
@@ -120,3 +121,15 @@ def test_a_negative_step_cannot_flip_the_arrow() -> None:
     # A step box the player typed "-5" into must not move the readout the other way.
     assert nudged("top-left", 0, 0, "right", -5) == nudged("top-left", 0, 0, "right", 5)
     assert nudged("top-left", 0, 0, "right", 0) == (0, 0)
+
+
+def test_a_rectangle_parked_off_the_screen_does_not_overlap_it() -> None:
+    # A minimised window measures as a rectangle parked at -32000 on this machine, and the
+    # automatic re-anchor must refuse it: anchoring to that hides the readout where nobody
+    # can see it.
+    screen = (0, 0, 1920, 1080)
+    assert not layout.overlaps(-32000, -32000, 1280, 720, *screen)
+    assert layout.overlaps(100, 100, 1280, 720, *screen)
+    assert layout.overlaps(-100, -100, 200, 200, *screen), "a corner still counts"
+    assert not layout.overlaps(1920, 0, 100, 100, *screen), "touching an edge is not overlapping"
+    assert not layout.overlaps(0, 0, 0, 0, *screen), "an empty rectangle is nowhere"

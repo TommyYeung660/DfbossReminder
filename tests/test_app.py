@@ -1024,6 +1024,133 @@ def test_both_surfaces_can_be_written_out_for_evidence() -> None:
     assert dumped == [("readout.bmp", "boxes.bmp")]
 
 
+# ------------------------------------------------- the automatic re-anchor
+
+
+class PlacedPresenter(FakePresenter):
+    """An overlay-shaped presenter that records where it was asked to move.
+
+    ``reposition`` answers with a note only when the window it was handed differs from the one
+    it had, which is the property the loop's silence depends on.
+    """
+
+    kind = "overlay"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.on_check = None
+        self.adjustment = (0, 0)
+        self.window = None
+        self.moves: list = []
+
+    def reposition(self, settings=None, nudge=None, window=None):  # noqa: ANN001
+        if nudge is not None:
+            self.adjustment = tuple(nudge)
+        # A *measurement* is a new object every time, so "did it move" compares the rectangle
+        # the real presenter would compare - the corner it computes - not the object.
+        moved = window is not None and (self.window is None
+                                        or window.client != self.window.client)
+        if window is not None:
+            self.window = window
+        if not moved:
+            return ""
+        self.moves.append((nudge, window))
+        return "moved to (10, 20)"
+
+
+def window_at(left: int, top: int) -> GameWindow:
+    return GameWindow(hwnd=1, pid=1, title="Dead Frontier",
+                      client=Rect(left, top, 1280, 720),
+                      screen=Rect(0, 0, 1920, 1080), exclusive_fullscreen=False)
+
+
+def test_the_readout_re_anchors_itself_on_a_timer(monkeypatch) -> None:
+    # The player, 2026-10-07: "每30秒自動做一次overlay 位置校正, overlay 校正按鈕保留". The timer
+    # is the button's own code path - measure the client again, put the readout where 顯示位置
+    # says - run on the thread that owns the window.
+    presenter = PlacedPresenter()
+    presenter.window = window_at(50, 50)          # placed at start, somewhere else
+    watch_obj, _presenter = watch(settings=parse_settings({"user_id": "14008279",
+                                                           "auto_align_seconds": 30.0}),
+                                  presenter=presenter)
+    monkeypatch.setattr(app, "find_game_window", lambda: window_at(100, 100))
+    watch_obj.tick(1000.0)
+    assert len(presenter.moves) == 1, "the first check anchors like a start does"
+    assert presenter.moves[0][0] is None, "and it asks for the move without a nudge"
+
+    watch_obj.tick(1020.0)
+    assert len(presenter.moves) == 1, "twenty seconds is not thirty"
+    watch_obj.tick(1031.0)
+    assert len(presenter.moves) == 1, "and neither is 'the window has not moved'"
+
+    monkeypatch.setattr(app, "find_game_window", lambda: window_at(300, 100))
+    watch_obj.tick(1040.0)
+    assert len(presenter.moves) == 1, "the interval restarts at each check"
+    watch_obj.tick(1065.0)
+    assert len(presenter.moves) == 2, "the client moved, so the readout follows"
+
+
+def test_a_nought_interval_means_never(monkeypatch) -> None:
+    presenter = PlacedPresenter()
+    watch_obj, _presenter = watch(settings=parse_settings({"user_id": "14008279",
+                                                           "auto_align_seconds": 0}),
+                                  presenter=presenter)
+    monkeypatch.setattr(app, "find_game_window", lambda: window_at(100, 100))
+    watch_obj.tick(1000.0)
+    monkeypatch.setattr(app, "find_game_window", lambda: window_at(900, 100))
+    watch_obj.tick(1099.0)
+    assert presenter.moves == [], "0 turns it off"
+
+
+def test_the_automatic_pass_keeps_the_players_nudge(monkeypatch) -> None:
+    # An automatic pass that cleared the arrows every thirty seconds would be the same "it
+    # fights the player" complaint that got the previous version deleted. The button clears
+    # the nudge; the timer does not.
+    presenter = PlacedPresenter()
+    watch_obj, _presenter = watch(settings=parse_settings({"user_id": "14008279",
+                                                           "auto_align_seconds": 30.0}),
+                                  presenter=presenter)
+    presenter.adjustment = (5, 5)
+    monkeypatch.setattr(app, "find_game_window", lambda: window_at(100, 100))
+    watch_obj.tick(1000.0)
+    assert presenter.adjustment == (5, 5)
+    assert presenter.moves[0][0] is None, "the move is asked for without a nudge"
+
+
+def test_a_minimised_client_is_never_used_as_an_anchor(monkeypatch) -> None:
+    # A minimised window measures as a rectangle parked off the side of the screen, and
+    # anchoring to that would hide the readout where nobody can see it - the one thing an
+    # automatic pass must never do.
+    presenter = PlacedPresenter()
+    watch_obj, _presenter = watch(settings=parse_settings({"user_id": "14008279",
+                                                           "auto_align_seconds": 30.0}),
+                                  presenter=presenter)
+    monkeypatch.setattr(app, "screen_rect", lambda: Rect(0, 0, 1920, 1080))
+    monkeypatch.setattr(app, "find_game_window", lambda: window_at(-32000, -32000))
+    note = watch_obj.auto_align(1000.0)
+    assert "不在畫面上" in note
+    assert presenter.moves == [], "and the readout stays where it was"
+    assert watch_obj._move(watch_obj.settings, None, remeasure=True) == note
+
+
+def test_the_console_hears_about_a_move_and_not_about_a_no_op(monkeypatch) -> None:
+    said: list[str] = []
+    presenter = PlacedPresenter()
+    # A presenter that has been placed once already, which is what the loop always starts
+    # with: the first check then finds the readout where it belongs and says nothing.
+    presenter.window = window_at(100, 100)
+    watch_obj, _presenter = watch(settings=parse_settings({"user_id": "14008279",
+                                                          "auto_align_seconds": 30.0}),
+                                  presenter=presenter)
+    watch_obj.log = said.append
+    monkeypatch.setattr(app, "find_game_window", lambda: window_at(100, 100))
+    watch_obj.tick(1000.0)
+    assert not [line for line in said if "auto re-anchor" in line]
+    monkeypatch.setattr(app, "find_game_window", lambda: window_at(300, 100))
+    watch_obj.tick(1040.0)
+    assert any("auto re-anchor: moved to" in line for line in said)
+
+
 def test_the_last_row_is_never_the_one_that_disappears() -> None:
     # The rows at the end are the ones that say whether an empty readout is correct; a
     # trim that lost them would hide the explanation.

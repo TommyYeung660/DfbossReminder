@@ -560,6 +560,14 @@ class Watch:
         # domain.dismissed). It lives here, in the loop, because the loop is what knows when
         # a fetch succeeded - and the end of a cycle is exactly that.
         self.dismissed = Dismissed()
+        # When the readout last re-measured the game window. The readout used to follow the
+        # client every few seconds, was deleted on 2026-09-23 for moving the list under the
+        # player while they read it, and is back now as a timed *re-anchor* - the same thing
+        # the 重新校正位置 button does (the player, 2026-10-07: "每30秒自動做一次overlay 位置校正,
+        # overlay 校正按鈕保留"). What makes it tolerable this time: it only moves the readout
+        # when the client has actually moved, it never touches the live nudge, and the interval
+        # is a setting the player can set to 0.
+        self.last_align = 0.0
         # A box was ticked since the last draw. The pump runs inside the loop's sleep
         # slices, so the redraw happens on the next slice instead of waiting for the tick.
         self._dirty = False
@@ -602,6 +610,22 @@ class Watch:
             self.log(f"{label}: no longer listed, so it is shown again if it returns")
         self.log(f"fetched {len(events)} boss events; player "
                  f"{player if player else 'position unknown'}")
+
+    # -------------------------------------------------------------------- position
+    def auto_align(self, now: float) -> str:
+        """Re-measure the game window and put the readout back, at most once an interval.
+
+        Returns the note the move produced, which is empty when the readout was already where
+        it belongs - and that is the common case, so nothing is logged and nothing moves. The
+        live nudge is *not* cleared (``nudge=None``), unlike the button: an arrow the player
+        pressed is theirs to keep, and an automatic pass that undid it every 30 seconds would
+        be the same "it fights the player" complaint that got this feature deleted once.
+        """
+        seconds = self.settings.auto_align_seconds
+        if seconds <= 0 or now - self.last_align < seconds:
+            return ""
+        self.last_align = now
+        return self._move(self.settings, None, remeasure=True)
 
     # -------------------------------------------------------------------- drawing
     def plan(self, now: float) -> Plan:
@@ -653,6 +677,11 @@ class Watch:
             self.refresh(now)
         status, stale = self.status(now)
         self.presenter.draw(self.plan(now), self.settings, self.account, status, stale)
+        note = self.auto_align(now)
+        if note:
+            # Only when the readout actually moved: an automatic pass that announced itself
+            # every interval would bury everything else the console says.
+            self.log(f"auto re-anchor: {note}")
         if self.dump_frame and not self.dumped:
             # The overlay's own surface, not a screenshot: a layered window is not
             # reproduced by a screen capture on every display configuration.
@@ -700,6 +729,16 @@ class Watch:
             window = find_game_window()
             if window is None:
                 return "找不到 Dead Frontier 視窗，位置未變"
+            screen = screen_rect()
+            client = window.client
+            if screen is not None and not layout.overlaps(client.left, client.top,
+                                                          client.width, client.height,
+                                                          screen.left, screen.top,
+                                                          screen.width, screen.height):
+                # A minimised window measures as a rectangle parked off the side of the
+                # screen. Anchoring to it would hide the readout where nobody can see it, so
+                # the readout is left where it is and says why.
+                return "遊戲視窗不在畫面上（最小化？），位置未變"
         return move(settings, nudge, window)
 
     def _pump(self) -> int:

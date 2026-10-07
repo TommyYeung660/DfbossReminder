@@ -102,6 +102,7 @@ def form_from_settings(settings: Settings) -> dict:
         "direction_style": settings.direction_style,
         "poll_seconds": settings.poll_seconds,
         "stale_seconds": settings.stale_seconds,
+        "auto_align_seconds": settings.auto_align_seconds,
         "base_url": settings.base_url,
         "waypoints": [
             {"label": label, "x": block.x, "y": block.y} for label, block in settings.waypoints
@@ -185,6 +186,7 @@ def payload_from_form(form: dict) -> dict:
         "direction_style": form.get("direction_style"),
         "poll_seconds": _float(form.get("poll_seconds"), 20.0),
         "stale_seconds": _float(form.get("stale_seconds"), 120.0),
+        "auto_align_seconds": _float(form.get("auto_align_seconds"), 30.0),
         "base_url": str(form.get("base_url", "")).strip(),
         "waypoints": form.get("waypoints") or [],
     }
@@ -348,10 +350,14 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
     # pressed, which is also how the arrows above work.
     ttk.Button(arrow_row, text="重新校正位置",
                command=lambda: do_realign()).pack(side="left", padx=(10, 0))
-    ttk.Label(nudge, text="箭頭按一下移一步，只是臨時微調，不會存進設定；"
-                          "overlay 正在跑時會立刻看到。\n"
+    entry(nudge, "自動校正（秒，0 = 不自動）", "auto_align_seconds", width=6,
+          value=settings.auto_align_seconds)
+    ttk.Label(nudge, text="箭頭按一下移一步，只是臨時微調，不會存進設定，"
+                          "而且自動校正不會把它歸零；overlay 正在跑時會立刻看到。\n"
                           "「重新校正位置」把微調歸零，回到上面「對齊位置／對齊位移」"
-                          "設定的位置 —— 遊戲視窗移動過之後也按它。",
+                          "設定的位置 —— 遊戲視窗移動過之後也可以按它。\n"
+                          "自動校正時間到就會自己重新量測遊戲視窗並回到設定位置"
+                          "（視窗真的移動過才會動，沒動就完全不動、不會吵你）。",
               foreground="#666666", justify="left").pack(anchor="w", pady=(4, 0))
 
     ttk.Label(placement, text="below-minimap 用小地圖的矩形，座標是客戶區座標：").pack(

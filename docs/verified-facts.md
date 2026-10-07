@@ -112,6 +112,19 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | **VIPER NORA has no CJK glyphs**, so the Chinese labels cannot be drawn in it - the header and notes would be a row of empty boxes beside boss lines that look perfect. Two faces are kept and each row picks by its content | Recorded live | the render probe drew 個附近 as boxes; the capture shows the Chinese rows in MS Gothic |
 | The readout is right-aligned, so its rows share a right edge with the minimap | Recorded live | the same capture |
 
+### Verified on the game PC, 2026-10-07 (eleventh session: the automatic re-anchor)
+
+R12: "每30秒自動做一次overlay 位置校正, overlay 校正按鈕保留" - the feature deleted on 2026-09-23,
+back as the button's own code path on a timer. Measured with `tools/pc/probe-auto-align.py`, which
+moves the real game window and touches nothing else.
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| **The readout follows a moved client by itself**: the client moved to `(218,13)` and the readout arrived at `(232,27)` - the client plus the configured 14 px - with no button, no key and no other input | Recorded live | `docs/evidence/2026-10-07-auto-align.txt` |
+| **An automatic pass keeps the player's nudge**: a `(5, 5)` nudge was applied, the client moved again, and after the timer's pass the readout sat at the configured position **plus (5, 5)** - `(297,72)` against a plain `(292,67)` | Recorded live | the same run |
+| **A stationary client produces a silent no-op**: one pass ran, its note was empty, and nothing was logged or moved | Recorded live | the same run (`notes ['']`) |
+| The default interval in the shipped settings is 30 s, `0` means never, and the off-screen guard refuses a minimised client (which measures as a rectangle parked at `-32000`) | Unit + settings round-trip | `tests/test_app.py`, `tests/test_layout.py`, `tests/test_settings.py` |
+
 ### Verified on the game PC, 2026-10-07 (tenth session: big bosses are not hidden by the radius)
 
 The player: "ultra boss 無法顯示, 應該是不受距離限制的". The live map had two `Devil Hound`
