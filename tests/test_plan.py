@@ -11,6 +11,7 @@ from dfbossreminder.domain.bosses import parse_bossmap
 from dfbossreminder.domain.geometry import Block
 from dfbossreminder.domain.plan import Note, build_plan, waypoint_rows
 from dfbossreminder.domain.settings import parse_settings
+from dfbossreminder.ui import view
 
 NOW = 10_000.0
 
@@ -49,6 +50,79 @@ def test_only_bosses_within_the_radius_are_shown() -> None:
     assert names == ["Near", "Edge"]
     assert plan.beyond_radius == 1
     assert Note("within", (("radius", 5),)) in plan.notes
+
+
+def test_a_big_boss_is_shown_even_when_it_is_well_out_of_range() -> None:
+    # The player, 2026-10-07: "ultra boss 無法顯示, 應該是不受距離限制的". The live map had a
+    # Devil Hound 26 blocks away with a 6-block radius, so the daily boss - the one worth
+    # crossing the map for, and the one whose window closes on a clock - was simply absent.
+    player = Block(1000, 1000)
+    found = events(
+        {"name": "Near", "blocks": [(1002, 1002)]},
+        {"name": "1 x Behemoth", "blocks": [(1030, 1000)]},       # 30 blocks
+    )
+    plan = build_plan(found, player, parse_settings({"radius_blocks": 5}), NOW)
+    assert [row.name for row in plan.rows] == ["1 x Behemoth", "Near"]
+    assert plan.rows[0].distance == 30
+    assert plan.rows[0].is_big
+    note = next(note for note in plan.notes if note.code == "big_far")
+    assert note.values() == {"count": 1, "radius": 5}
+    assert "不受距離限制" in view.note_text(note, "zh")
+    # And it is not counted as a radius problem: it is not beyond the radius, it is a big
+    # boss, and one row must not be reported in two counts that mean different things.
+    assert plan.beyond_radius == 0
+    assert plan.nearby_sightings == 1, "the title must not call 30 blocks away 'nearby'"
+
+
+def test_a_far_big_boss_is_one_row_not_one_row_per_block() -> None:
+    # The live `1 x Devil Hound` listed twelve blocks in one small region. Twelve
+    # near-identical rows forty blocks away is not information; the nearest block is.
+    player = Block(1000, 1000)
+    found = events({"name": "1 x Devil Hound",
+                    "blocks": [(1020, 1000), (1035, 1000), (1025, 1005)]})
+    plan = build_plan(found, player, parse_settings({"radius_blocks": 5}), NOW)
+    assert len(plan.rows) == 1
+    assert plan.rows[0].block == Block(1020, 1000), "and it is the closest of them"
+    assert plan.rows[0].distance == 20
+
+
+def test_a_big_boss_inside_the_radius_still_lists_its_blocks() -> None:
+    # The exemption only adds rows for a boss that would otherwise be invisible: an event
+    # with blocks in range is listed by those blocks, and must not also get a fallback row.
+    player = Block(1000, 1000)
+    found = events({"name": "1 x Behemoth", "blocks": [(1002, 1000), (1004, 1000),
+                                                       (1040, 1000)]})
+    plan = build_plan(found, player, parse_settings({"radius_blocks": 5}), NOW)
+    assert [row.distance for row in plan.rows] == [2, 4]
+    assert not [note for note in plan.notes if note.code == "big_far"]
+
+
+def test_the_exemption_is_for_big_bosses_only() -> None:
+    # An ordinary boss out of range stays out: the rule is about the tier, not about
+    # "showing more things".
+    player = Block(1000, 1000)
+    found = events(
+        {"name": "1 x Behemoth", "blocks": [(1030, 1000)]},
+        {"name": "6 x Bandits", "blocks": [(1030, 1000)]},
+    )
+    plan = build_plan(found, player, parse_settings({"radius_blocks": 5}), NOW)
+    assert [row.name for row in plan.rows] == ["1 x Behemoth"]
+    assert plan.beyond_radius == 1, "the ordinary one is still counted as beyond"
+
+
+def test_no_player_position_is_still_the_setting_to_decide() -> None:
+    # With no position there is no distance to be exempt from, so nothing changes: that
+    # case belongs to show_all_without_player and is reported as such.
+    found = events({"name": "1 x Behemoth", "blocks": [(1030, 1000)]})
+    quiet = build_plan(found, None,
+                       parse_settings({"radius_blocks": 5,
+                                       "show_all_without_player": False}), NOW)
+    assert quiet.rows == ()
+    assert Note("no_player") in quiet.notes
+    # The default lists everything, which is how a boss can be visible with no position at
+    # all - the row's third field is when its window closes, and that needs no position.
+    everything = build_plan(found, None, parse_settings({"radius_blocks": 5}), NOW)
+    assert [row.name for row in everything.rows] == ["1 x Behemoth"]
 
 
 def test_the_radius_is_dynamic_because_it_is_a_setting() -> None:

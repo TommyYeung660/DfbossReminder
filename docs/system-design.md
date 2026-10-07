@@ -42,6 +42,10 @@ Read as engineering statements:
 * **R8** — no automatic re-anchoring. The readout stopped following the game window; its
   position is set by the player, from buttons in the settings window.
 * **R9** — one program: opening the config and pressing 開始 opens the overlay.
+* **R10** — a tick box on every boss line: one click hides that boss's other lines too, and
+  only until its next cycle (2026-10-06).
+* **R11** — an ultra (big) boss is shown whatever the distance: "ultra boss 無法顯示,
+  應該是不受距離限制的" (2026-10-07).
 
 ## 2. The facts this design turns on
 
@@ -363,6 +367,30 @@ So the two are separated, and the names now mean what they say:
 The consequence worth stating: starting the readout again returns it to the configured
 position. That is the same statement as the button, and it is the one that makes the
 configuration the source of truth.
+
+### D25 — A big boss is never hidden by the radius, and is one row when it is far
+
+R11, in the player's words: *"ultra boss 無法顯示, 應該是不受距離限制的"*. The live map had a
+`1 x Devil Hound` 26 blocks away and their radius was 6, so the daily boss - the one worth
+crossing the map for, and the one whose window closes on a clock - was simply absent.
+
+The rule is now: **the radius decides which ordinary bosses are listed; a big boss is always
+listed.** Two details keep that from flooding a strip that shows fourteen rows:
+
+* **an out-of-range big boss is one row, not one per block.** The tier is a configured name
+  list, and the live `1 x Devil Hound` listed twelve blocks inside a 15x12-block region -
+  twelve near-identical rows forty blocks from the player is not information. So an event with
+  blocks inside the radius is listed by those blocks (unchanged), and an event with *none*
+  inside it is listed once, by its nearest one;
+* **with no player position nothing changes.** There is no distance to be exempt from, and
+  that case belongs to ``show_all_without_player`` - which defaults to listing everything
+  anyway.
+
+Two counts stay honest about it: ``beyond_radius`` counts ordinary bosses out of range only
+(the big ones are not a radius problem), and ``nearby_sightings`` counts the rows the radius
+accounts for, so the console title does not call a boss forty blocks away "nearby". The plan
+also carries a ``big_far`` note, so the console answers "why is this row here when my radius
+is 6?" without anyone having to read the code.
 
 ### D24 — The tick boxes are a second window, and a tick belongs to one cycle
 

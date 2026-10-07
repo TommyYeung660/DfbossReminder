@@ -112,6 +112,19 @@ title `Dead Frontier`, on a `1920x1080` primary screen.
 | **VIPER NORA has no CJK glyphs**, so the Chinese labels cannot be drawn in it - the header and notes would be a row of empty boxes beside boss lines that look perfect. Two faces are kept and each row picks by its content | Recorded live | the render probe drew 個附近 as boxes; the capture shows the Chinese rows in MS Gothic |
 | The readout is right-aligned, so its rows share a right edge with the minimap | Recorded live | the same capture |
 
+### Verified on the game PC, 2026-10-07 (tenth session: big bosses are not hidden by the radius)
+
+The player: "ultra boss 無法顯示, 應該是不受距離限制的". The live map had two `Devil Hound`
+events up, 26 and 32 blocks from their block, with a 6-block radius - so the daily boss, the one
+whose window closes on a clock, was absent from the readout.
+
+| Fact | Level | Source |
+| --- | --- | --- |
+| **Both live Devil Hounds are now listed, at the top, one row each**, with their expiry times: `Devil Hound \| 1056 x 991 \| 14:49` (26 blocks) and `Devil Hound \| 1027 x 1028 \| 15:00` (32 blocks) - the second of which has 12 blocks in the feed and contributed exactly one row | Recorded live, real account and real boss map | `docs/evidence/2026-10-07-bigboss-dump.txt`, `docs/evidence/2026-10-07-bigboss-real-data.png` |
+| The plan explains itself: `2 個大型 boss 在 6 格外（不受距離限制）`, and the counts stay honest - `6 個附近` counts only the rows the radius accounts for, `半徑外 160 個` counts ordinary bosses out of range only | Recorded live | `--once` output in the same file |
+| The exemption is for the tier only: an ordinary boss out of range is still hidden and still counted as beyond | Unit + re-injection | `tests/test_plan.py` (removing the exemption fails three tests) |
+| With no player position nothing changed: there is no distance to be exempt from, and that case is the `show_all_without_player` setting's (default: show everything) | Unit | `tests/test_plan.py` |
+
 ### Verified on the game PC, 2026-10-06 (ninth session: the tick boxes)
 
 The player's sixth request: a box at the right of every boss line, a left click on one hides

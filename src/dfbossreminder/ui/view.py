@@ -40,6 +40,8 @@ NOTE_TEXT: dict[str, tuple[str, str]] = {
     "capped": ("還有 {count} 個未顯示", "{count} more not shown"),
     "dismissed": ("你隱藏了 {bosses} 個 boss（{rows} 列），下個周期會再出現",
                   "you hid {bosses} boss(es) ({rows} lines); back next cycle"),
+    "big_far": ("{count} 個大型 boss 在 {radius} 格外（不受距離限制）",
+                "{count} big boss(es) beyond the radius (never hidden by distance)"),
 }
 
 STATUS_TEXT: dict[str, tuple[str, str]] = {

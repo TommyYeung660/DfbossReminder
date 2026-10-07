@@ -111,6 +111,19 @@ powershell -ExecutionPolicy Bypass -File tools\pc\run-dfboss.ps1 -Presentation o
 powershell -ExecutionPolicy Bypass -File tools\pc\stop-dfboss.ps1
 ```
 
+### 大型／終極 boss 不受距離限制
+
+**大型 boss（設定的名稱清單，預設 `Devil Hound`、`Volatile Leaper`、`Behemoth`）永遠會顯示，
+不受半徑限制** —— 牠們是值得跑過去打的目標，而那一行顯示的是**結束時間**，不是方位。
+
+* 範圍外的時候，一個 boss **只列一列**（它最近的格子）：實測那個 `Devil Hound` 在資料裡
+  有 12 個格子、都在同一小區，列 12 列等於沒資訊；
+* 如果在半徑內，照樣列出半徑內的所有格子（跟以前一樣），不會多一列；
+* 沒有玩家座標時不變：那種情況由「沒有座標時顯示全部」的設定決定（預設是顯示全部）。
+
+主控台會說明：`2 個大型 boss 在 6 格外（不受距離限制）`，而標題的「N 個附近」只算半徑內的，
+不會把 30 格外的東西講成「附近」。
+
 ### 每行的剔選框（把某個 boss 收起來）
 
 每一行 boss 的**最右邊有一個小方格**，用**左鍵**點它：

@@ -141,15 +141,28 @@ def build_plan(
     now: float,
     dismissed: Container = frozenset(),
 ) -> Plan:
-    """Decide the rows: everything within the radius, nearest first.
+    """Decide the rows: everything within the radius, plus every big boss, nearest first.
 
     There is no filter any more. The player's third requirement started as a whitelist
     that *hid* everything else; on 2026-09-23 they replaced it with coordinate styles,
-    which colour a matching boss instead of removing the rest. So the only question here
-    is the radius one - "what is near me" - and ``settings.highlights`` never changes
-    which rows exist, only how the view draws them.
+    which colour a matching boss instead of removing the rest. So for an ordinary boss the
+    only question here is the radius one - "what is near me" - and ``settings.highlights``
+    never changes which rows exist, only how the view draws them.
 
-    ``dismissed`` is the one thing that does remove rows, and it is not a filter in that
+    **A big boss is never hidden by the radius** (the player, 2026-10-07: "ultra boss 無法
+    顯示, 應該是不受距離限制的"). The tier is a configured name list, and these are the
+    bosses worth crossing the map for, so a live one is always worth a row - what the row
+    gives is not a bearing but the time its window closes. Two details keep that from
+    flooding the readout:
+
+    * an event that lists several blocks contributes the rows it would have contributed
+      inside the radius, and **one** row when none of its blocks is inside it - the nearest
+      one. The live map's ``1 x Devil Hound`` listed twelve blocks in one small region, and
+      twelve near-identical rows forty blocks away is not information;
+    * with no player position there is no distance to be exempt from, so nothing changes:
+      that case is the ``show_all_without_player`` setting's to decide.
+
+    ``dismissed`` is the one thing that *does* remove rows, and it is not a filter in that
     sense: it is the box column's state, one tick at a time, and it is dropped at the end
     of the cycle by ``domain.dismissed``. Dismissed rows are taken out *before* the radius
     test, so a boss the player has put away is not also counted as "beyond the radius" -
@@ -171,6 +184,7 @@ def build_plan(
                                         ("rows", len(put_away)))))
     considered = [row for row in considered if row.cycle_key not in dismissed]
 
+    far_big: list[BossRow] = []
     if player is None:
         # No position means no radius to measure. Listing everything at least names
         # the bosses that are out, and the note keeps that from looking deliberate.
@@ -178,12 +192,29 @@ def build_plan(
         chosen = considered if settings.show_all_without_player else []
     else:
         chosen = []
+        nearest_out_of_range: dict[tuple, BossRow] = {}
         for row in considered:
             if row.distance is not None and row.distance <= settings.radius_blocks:
                 chosen.append(row)
+            elif row.is_big:
+                # Out of range and big: keep only the closest block of each such event, so
+                # one distant boss is one row however many places the feed lists for it.
+                best = nearest_out_of_range.get(row.cycle_key)
+                if best is None or (row.distance or 0) < (best.distance or 0):
+                    nearest_out_of_range[row.cycle_key] = row
             else:
                 beyond += 1
+        # An event with a block inside the radius already has its rows; it must not get a
+        # second row out of the fallback as well.
+        in_range = {row.cycle_key for row in chosen}
+        far_big = [row for key, row in nearest_out_of_range.items() if key not in in_range]
+        chosen = chosen + far_big
         notes.append(Note("within", (("radius", settings.radius_blocks),)))
+        if far_big:
+            # The console is where "why is this row here when my radius is 6?" is answered.
+            notes.append(Note("big_far",
+                              (("count", len(far_big)),
+                               ("radius", settings.radius_blocks))))
 
     # Nearest first; the straight-line distance only breaks ties between cells that
     # are the same number of blocks away, so the order never contradicts the count.
@@ -212,7 +243,9 @@ def build_plan(
         player=player,
         notes=tuple(notes),
         total_sightings=len(sightings),
-        nearby_sightings=len(chosen),
+        # "N nearby" counts the rows the radius accounts for, not the big bosses that were
+        # let in from outside it: the title must not call something forty blocks away near.
+        nearby_sightings=len(chosen) - len(far_big),
         shown=len(shown),
         beyond_radius=beyond,
     )
