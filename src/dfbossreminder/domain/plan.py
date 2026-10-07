@@ -113,12 +113,7 @@ class Plan:
         return not self.rows
 
 
-def _row(
-    sighting: Sighting,
-    player: Block | None,
-    now: float,
-    big_bosses: tuple[str, ...],
-) -> BossRow:
+def _row(sighting: Sighting, player: Block | None, now: float) -> BossRow:
     bearing = Bearing.between(player, sighting.block) if player else None
     return BossRow(
         name=sighting.name,
@@ -128,8 +123,8 @@ def _row(
         distance=bearing.blocks if bearing else None,
         bearing=bearing,
         minutes_left=sighting.event.minutes_left(now),
-        # The spawn's own window is part of the tier: see tier_of.
-        tier=tier_of(sighting.name, big_bosses, sighting.event.duration_minutes),
+        # The spawn's own window decides the tier: see tier_of.
+        tier=tier_of(sighting.event.duration_minutes),
         end_epoch=sighting.event.end,
         cycle_key=sighting.cycle_key,
     )
@@ -174,7 +169,7 @@ def build_plan(
 
     beyond = 0
     considered: list[BossRow] = [
-        _row(sighting, player, now, settings.big_bosses) for sighting in sightings
+        _row(sighting, player, now) for sighting in sightings
     ]
     put_away = [row for row in considered if row.cycle_key in dismissed]
     if put_away:

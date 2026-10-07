@@ -66,29 +66,25 @@ def test_a_big_boss_line_shows_the_end_time_instead_of_a_bearing() -> None:
     assert text == "Devil Hound | 1052 x 1018 | 18:00"
 
 
-def test_the_tier_comes_from_the_configured_name_list_on_a_daily_window() -> None:
+def test_the_tier_is_the_spawns_own_window_length() -> None:
+    # The player's rule, 2026-10-07: "大於一小時的boss 不受半徑限制". The map's timings decide
+    # it, so no setting and no name list can be out of step with the game - and a long window
+    # is drawn with its end time instead of a bearing, because that is what a special boss is
+    # for: crossing the map before it closes.
     end = time.mktime((2026, 9, 22, 3, 5, 0, 0, 0, -1))
-    specs = [{"name": "1 x Volatile Leaper", "blocks": [(1001, 1000)], "end_epoch": end,
-              "window_minutes": 180}]
-    default = plan_for(specs, Block(1000, 1000), radius_blocks=10)
-    assert default.rows[0].is_big
-    assert view.rows_for(default, parse_settings({"radius_blocks": 10}))[0].text.endswith("03:05")
+    for minutes in (180, 120):                       # a three-hour and a two-hour daily
+        specs = [{"name": "1 x Volatile Leaper", "blocks": [(1001, 1000)], "end_epoch": end,
+                  "window_minutes": minutes}]
+        plan = plan_for(specs, Block(1000, 1000), radius_blocks=10)
+        assert plan.rows[0].is_big, minutes
+        assert view.rows_for(plan, parse_settings({"radius_blocks": 10}))[0].text.endswith("03:05")
 
-    # Configured off, the same boss is drawn as an ordinary one.
-    off = parse_settings({"radius_blocks": 10, "big_bosses": []})
-    assert not build_plan(parse_bossmap(payload(*specs), NOW), Block(1000, 1000), off, NOW).rows[0].is_big
-
-    # And a boss the player adds becomes big - on a daily window, like the ones above: the
-    # name list says *which* bosses are wanted, the window says whether this spawn is the
-    # daily one, and a city-cycle spawn of the same name is neither.
-    mine = parse_settings({"radius_blocks": 10, "big_bosses": ["Dreadstag"]})
-    added = parse_bossmap(payload({"name": "2 x Dreadstag", "blocks": [(1001, 1000)],
-                                   "end_epoch": end, "window_minutes": 180}), NOW)
-    assert build_plan(added, Block(1000, 1000), mine, NOW).rows[0].is_big
-
-    short = parse_bossmap(payload({"name": "2 x Dreadstag", "blocks": [(1001, 1000)],
-                                   "end_epoch": end}), NOW)
-    assert not build_plan(short, Block(1000, 1000), mine, NOW).rows[0].is_big
+    # The same enemy on a city cycle is an ordinary boss: this is the case the player pointed
+    # at, and the reason the tier stopped being a name.
+    city = plan_for([{"name": "1 x Devil Hound", "blocks": [(1001, 1000)], "end_epoch": end,
+                      "window_minutes": 60}], Block(1000, 1000), radius_blocks=10)
+    assert not city.rows[0].is_big
+    assert not view.rows_for(city, parse_settings({"radius_blocks": 10}))[0].text.endswith("03:05")
 
 
 def test_a_big_boss_is_listed_before_a_closer_normal_one() -> None:

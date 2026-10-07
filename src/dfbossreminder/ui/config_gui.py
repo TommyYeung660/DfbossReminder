@@ -27,7 +27,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..domain.bosses import DEFAULT_BIG_BOSSES
 from ..domain.colours import normalize_colour
 from ..domain.coordinates import CoordinateError, parse_cells
 from ..domain.coordinates import to_dict as cells_to_dict
@@ -103,7 +102,6 @@ def form_from_settings(settings: Settings) -> dict:
         "direction_style": settings.direction_style,
         "poll_seconds": settings.poll_seconds,
         "stale_seconds": settings.stale_seconds,
-        "big_bosses": "\n".join(settings.big_bosses),
         "base_url": settings.base_url,
         "waypoints": [
             {"label": label, "x": block.x, "y": block.y} for label, block in settings.waypoints
@@ -160,8 +158,6 @@ def payload_from_form(form: dict) -> dict:
             # than being silently dropped. ``do_save`` refuses first and names the rule.
             parsed = cells
         highlights.append({"colour": normalize_colour(colour) or colour, "cells": parsed})
-    big_bosses = [line.strip() for line in str(form.get("big_bosses", "")).splitlines()
-                  if line.strip()]
     return {
         "user_id": str(form.get("user_id", "")).strip(),
         "radius_blocks": _int(form.get("radius_blocks"), 8),
@@ -189,7 +185,6 @@ def payload_from_form(form: dict) -> dict:
         "direction_style": form.get("direction_style"),
         "poll_seconds": _float(form.get("poll_seconds"), 20.0),
         "stale_seconds": _float(form.get("stale_seconds"), 120.0),
-        "big_bosses": big_bosses,
         "base_url": str(form.get("base_url", "")).strip(),
         "waypoints": form.get("waypoints") or [],
     }
@@ -462,21 +457,16 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
                    command=lambda k=key, s=swatch: pick_colour(k, s)).pack(side="left")
 
     # ------------------------------------------------------------- big bosses
-    big = section("大型／終極 boss（顯示結束時間）")
-    ttk.Label(big, text="一行一個名稱：這份清單決定哪些 boss 用「結束時間」的格式顯示，\n"
-                        "而且是每日 spawn（地圖上 3 小時的長視窗）才算 —— 同名但屬於\n"
-                        "城市循環（1 小時）的不算，也不會因此不受距離限制。",
-              justify="left").pack(anchor="w")
-    big_box = tk.Text(big, height=6, width=40)
-    big_box.insert("1.0", "\n".join(settings.big_bosses or DEFAULT_BIG_BOSSES))
-    big_box.pack(fill="x", pady=4)
+    # The tier is the map's own: a spawn whose window is longer than an hour is a special
+    # (big/ultra) boss, and it is drawn with its end time instead of a bearing. There is no
+    # list to keep here any more - two attempts at one were wrong in the same way, because a
+    # name is not an identity (see domain/bosses.py, DAILY_WINDOW_MINUTES).
 
     # ---------------------------------------------------------------- actions
     def collect() -> dict:
         """The current widget values, in the plain shape ``payload_from_form`` reads."""
         form = {key: variable.get() for key, variable in variables.items()}
         form["colours"] = dict(colour_vars)
-        form["big_bosses"] = big_box.get("1.0", "end")
         form["highlights"] = [{"colour": record["colour"].get(), "cells": record["cells"].get()}
                               for record in style_rows]
         form["waypoints"] = [{"label": label, "x": block.x, "y": block.y}
@@ -565,8 +555,6 @@ def run_config(path: Path, load, save, controller=None, visible: bool = True,
         style_rows.clear()
         for existing in fresh["highlights"]:
             add_style_row(existing)
-        big_box.delete("1.0", "end")
-        big_box.insert("1.0", fresh["big_bosses"])
         status.configure(text=f"已從 {path} 重新載入")
 
     def do_realign() -> None:

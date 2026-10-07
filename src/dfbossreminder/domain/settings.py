@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from .bosses import DEFAULT_BIG_BOSSES
 from .colours import hex_to_rgb as _hex_to_rgb
 from .geometry import Block
 from .styles import Highlight, StyleError, colour_for, parse_highlights
@@ -125,7 +124,6 @@ class Settings:
     language: str = "zh"
 
     # The bosses drawn with the "name | block | end time" form instead of a bearing.
-    big_bosses: tuple[str, ...] = DEFAULT_BIG_BOSSES
     direction_style: str = "zh"
     # Empty means "let the overlay pick a fixed-pitch font that has CJK glyphs".
     # Set it to override, e.g. on a machine where the first choice is missing.
@@ -260,22 +258,6 @@ def _colours(value: object, default: tuple[tuple[str, str], ...]) -> tuple[tuple
     return tuple((key, merged[key]) for key in COLOUR_KEYS)
 
 
-def _big_bosses(value: object, default: tuple[str, ...]) -> tuple[str, ...]:
-    """The big-boss tier, as configured names.
-
-    A list is honoured even when it is empty - that is a player saying "I have no big
-    bosses configured", not a missing value; only a value that is not a list at all
-    falls back to the default.
-    """
-    if not isinstance(value, (list, tuple)):
-        return default
-    names: list[str] = []
-    for item in value:
-        if isinstance(item, str) and item.strip():
-            names.append(item.strip())
-    return tuple(names)
-
-
 def _text_field(value: object, default: str, limit: int = 64) -> str:
     if isinstance(value, str) and value.strip() and len(value.strip()) <= limit:
         return value.strip()
@@ -341,7 +323,6 @@ def parse_settings(payload: object) -> Settings:
         minimap_top=_clamp_int(payload.get("minimap_top"), defaults.minimap_top, -2000, 4000),
         minimap_size=_clamp_int(payload.get("minimap_size"), defaults.minimap_size, 40, 800),
         minimap_gap=_clamp_int(payload.get("minimap_gap"), defaults.minimap_gap, 0, 200),
-        big_bosses=_big_bosses(payload.get("big_bosses"), defaults.big_bosses),
         waypoints=_waypoints(payload.get("waypoints"), defaults.waypoints),
     )
 
@@ -378,7 +359,6 @@ def to_dict(settings: Settings) -> dict:
         "minimap_top": settings.minimap_top,
         "minimap_size": settings.minimap_size,
         "minimap_gap": settings.minimap_gap,
-        "big_bosses": list(settings.big_bosses),
         "waypoints": [{"label": label, "x": block.x, "y": block.y}
                       for label, block in settings.waypoints],
     }

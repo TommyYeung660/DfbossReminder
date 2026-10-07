@@ -50,6 +50,7 @@ here is an implementation fact at best.
 | `2026-09-22-overlay-weight-shadow-comparison.png` | The same line in the same font twice, at 3x: `weight 300 asked, single drop shadow` above `weight 400 asked, four-offset shadow`. The shadow is the only difference between the rows, which is where the visible lightening comes from |
 | `2026-09-22-overlay-weight300-on-client.png` | The readout over the game client at the shipped settings — `weight=300`, single drop shadow, right-aligned, transparent backing |
 | `2026-09-23-exe-build-position.txt` | `tools\pc\build-exe.cmd` rebuilding the exe after the 停止/position fixes (`Built … DFBossReminder.exe (11136567 bytes, 23/09/2026 12:35)`), with the old config exe removed |
+| `2026-10-07-window-dump.txt` | The live run with the final rule (a window longer than an hour): the feed's three `1 x Devil Hound` entries reduce to the single 3-hour daily, `1 個大型 boss 在 6 格外（不受距離限制）`, and the nearby ordinary bosses are untouched |
 | `2026-10-07-tier-dump.txt` | The live run after the tier was made "name **and** daily window": of the three `1 x Devil Hound` entries in the feed, exactly one is drawn - `1056 x 991`, the three-hour spawn - and `1 個大型 boss 在 6 格外（不受距離限制）` |
 | `2026-10-07-tier-real-data.png` | That readout: the single real ultra boss at the top with its expiry time, then the nearby ordinary bosses |
 | `2026-10-07-bigboss-dump.txt` | The live run with the radius exemption: two `Devil Hound` rows (26 and 32 blocks away, one row each, with their expiry times), `8 box(es)`, `20px reserved for the tick boxes` |

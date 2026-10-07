@@ -107,7 +107,6 @@ def test_every_documented_field_survives_the_round_trip_unchanged() -> None:
         "colours": {"list": "#00FF00", "big": "#FFFF00", "title": "#00AA00",
                     "note": "#888888", "background": "#000000", "border": "#333333"},
         "minimap_left": 1060, "minimap_top": 10, "minimap_size": 215, "minimap_gap": 6,
-        "big_bosses": ["Devil Hound", "Dreadstag"],
         "waypoints": [{"label": "Home", "x": 1054, "y": 987}],
     })
     assert parse_settings(to_dict(settings)) == settings
@@ -159,14 +158,16 @@ def test_the_default_minimap_rectangle_is_the_measured_one() -> None:
     assert settings.anchor == "below-minimap"
 
 
-def test_the_big_boss_list_defaults_to_the_wikis_special_daily_bosses() -> None:
-    assert Settings().big_bosses == ("Devil Hound", "Volatile Leaper", "Behemoth")
-
-
-def test_an_empty_big_boss_list_is_honoured_not_replaced() -> None:
-    # Clearing the list is a player saying "I count nothing as big", not a missing value.
-    assert parse_settings({"big_bosses": []}).big_bosses == ()
-    assert parse_settings({"big_bosses": "Devil Hound"}).big_bosses == Settings().big_bosses
+def test_a_settings_file_from_an_older_build_still_loads() -> None:
+    # `big_bosses` was a configured name list until 2026-10-07, when the tier became the
+    # spawn's own window length. Files written before that still carry the key, and the file
+    # on the player's machine is one of them: an unknown key must be ignored, not refused, and
+    # not carried back into what is saved next.
+    old = {"user_id": "14008279", "big_bosses": ["Devil Hound", "Dreadstag"],
+           "radius_blocks": 6}
+    settings = parse_settings(old)
+    assert settings.user_id == "14008279" and settings.radius_blocks == 6
+    assert "big_bosses" not in to_dict(settings)
 
 
 def test_opacity_zero_is_allowed_because_that_is_the_transparent_mode() -> None:

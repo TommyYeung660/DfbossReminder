@@ -20,13 +20,16 @@ from dfbossreminder.ui import view
 from dfbossreminder.ui.panel import Row
 
 PROFILE = {"gpscoords": ["1057", "1017"], "override": {"account_name": "tommy660"}}
+# The window matters: a spawn longer than an hour is a special boss and is exempt from the
+# radius, so these two are ordinary city-cycle spawns (an hour each). ``start_time`` used to be
+# a placeholder 1, which the fixture survived only while nothing read the window.
 BOSS = {
     "1": {"game_id": "1", "locations": [["1057", "1018"]], "special_enemy_type": "Bandits",
           "special_enemy_amount": "2", "boss_num": "1", "event_type": "",
-          "start_time": "1", "end_time": "9999999999"},
+          "start_time": "9999996399", "end_time": "9999999999"},      # one hour
     "2": {"game_id": "2", "locations": [["1200", "1200"]], "special_enemy_type": "Titan",
           "special_enemy_amount": "1", "boss_num": "2", "event_type": "",
-          "start_time": "1", "end_time": "9999999999"},
+          "start_time": "9999996399", "end_time": "9999999999"},      # one hour
 }
 
 
@@ -871,7 +874,9 @@ class ClickingPresenter(FakePresenter):
         self.pumps = 0
         self.click_at_pump = click_at_pump
         self.draws_when_clicked: int | None = None
-        self.clicked = ("1", 1.0)        # the BOSS fixture's Bandits spawn
+        # The key the BOSS fixture's Bandits spawn carries: (game_id, the cycle's start), so
+        # it has to be kept in step with that fixture.
+        self.clicked = ("1", 9999996399.0)
 
     def pump_messages(self) -> int:
         self.pumps += 1
@@ -895,7 +900,7 @@ def test_the_loop_pumps_a_tick_and_redraws_at_once() -> None:
     assert presenter.pumps >= 3, "the loop must pump, or a tick can never be dispatched"
     assert presenter.draws_when_clicked is not None, "the click never reached the loop"
     assert len(presenter.draws) > presenter.draws_when_clicked, "a tick must redraw at once"
-    assert ("1", 1.0) in watch_obj.dismissed
+    assert ("1", 9999996399.0) in watch_obj.dismissed
     # The redraw that followed the click is missing that boss's rows, and only its rows.
     assert [row.name for row in presenter.draws[-1]["plan"].rows] == ["Titan"]
     assert presenter.closed

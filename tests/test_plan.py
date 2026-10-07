@@ -19,7 +19,7 @@ NOW = 10_000.0
 def payload(*events: dict) -> dict:
     """A boss-map payload; ``window_minutes`` says how long the spawn's window is.
 
-    It matters to the tier: a big boss is a configured name **on a daily window** (see
+    It matters to the tier: a special boss is one whose window is **longer than an hour** (see
     ``tier_of``), so a fixture on the default one-hour window is an ordinary city-cycle spawn
     however it is named.
     """
@@ -62,7 +62,7 @@ def test_only_bosses_within_the_radius_are_shown() -> None:
 
 def test_a_big_boss_is_shown_even_when_it_is_well_out_of_range() -> None:
     # The player, 2026-10-07: "ultra boss 無法顯示, 應該是不受距離限制的". The live map had a
-    # Devil Hound 26 blocks away with a 6-block radius, so the daily boss - the one worth
+    # daily boss 26 blocks away with a 6-block radius, so the special spawn - the one worth
     # crossing the map for, and the one whose window closes on a clock - was simply absent.
     player = Block(1000, 1000)
     found = events(

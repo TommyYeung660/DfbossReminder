@@ -81,15 +81,16 @@ only with a recorded measurement that it agrees with the map.
 
 ### 2.2 The last three decisions this section needed, and where the data came from
 
-**The coordinate readout is trimmed, never assumed.** Which bosses are "big" or
-"ultra" is **not in the boss map**: the payload has a name, a count, spawn blocks and
-two timestamps, and nothing that grades a boss. The wiki's *Bosses* page carries the
-grading in prose — threat levels 1–8, plus "Special Daily Bosses" which are "extra
-tough", spawn once per day, and stay for up to three hours instead of one. The tier
-is therefore a **configured name list**, defaulting to those three (Devil Hound,
-Volatile Leaper, Behemoth), editable in the settings window. The alternative —
-guessing a tier from the quote count or the duration — would be a number that looks
-like a fact and is not one.
+**The tier is in the payload after all, and it took two wrong answers to find it.** The
+payload has no field that grades a boss - a name, a count, spawn blocks and two
+timestamps - so "big/ultra" was first a **configured name list** (the wiki's Special
+Daily Bosses: Devil Hound, Volatile Leaper, Behemoth). That was wrong twice over, and
+each time the player said so: *a name is not an identity*. On 2026-10-07 the map carried
+three ``1 x Devil Hound`` entries at once, and only one was the daily boss. The field
+that distinguishes them is the **length of the window**, which the map has had all along:
+city cycles last one hour, special spawns two or three. So a special boss is a spawn
+whose window is **longer than an hour** - the player's own simplification, and it needs
+no configuration at all, which is what makes it unable to disagree with the game.
 
 **The bearing encoding was derived, then confirmed.** ``5LD1`` is
 ``{n}L|R`` followed by ``U|D{n}``: five blocks left and one down. That reading comes
@@ -386,11 +387,12 @@ across a whole live payload (50 entries, 2026-10-07):
 | 3.00 h | 1 | `1 x Devil Hound` at `1056,991`, a single fixed block - the daily boss |
 | 0.08 h | 2 | short special spawns (Six-Armed Bandit) |
 
-That 3-versus-1 hour split is the wiki's own definition of a Special Daily Boss, which is what the
-name list was always trying to say. So the tier is now **both**: a name the player configured
-**and** a window of 3 hours (threshold 2.5 h, halfway between the two long bands, because the map
-may extend a live window). The name list keeps its meaning - "which bosses do I care about" - and
-the map supplies the part a name cannot: whether *this spawn* is the daily one.
+The player's rule, 2026-10-07: *"有些 Special Daily 是2小時的, 將規則簡化為大於一小時的boss
+不受半徑限制即可"* - a spawn whose window is longer than an hour is a special boss. The threshold
+sits at 1.5 h, inside the empty band between 1 h and 2 h, so neither a city cycle nor a daily can
+flip sides over a few minutes of drift. **The name list is gone**, from the settings file and from
+the settings window with it: a knob that cannot affect anything is worse than no knob, and the map
+already answers the question.
 
 **And a big boss is never hidden by the radius.** The radius decides which ordinary bosses are
 listed; a big boss is always listed. Two details keep that from flooding a strip that fits

@@ -175,14 +175,6 @@ def apply_overrides(settings: Settings, args: argparse.Namespace) -> tuple[Setti
     if args.include_missions:
         updates["include_missions"] = True
         changed = True
-    if args.big_boss:
-        names = list(settings.big_bosses)
-        for name in args.big_boss:
-            if name.strip() and name.strip() not in names:
-                names.append(name.strip())
-        updates["big_bosses"] = tuple(names)
-        changed = True
-
     if updates:
         settings = replace(settings, **updates)
         # Re-validate through the normalizer so a clamped field is clamped the same
